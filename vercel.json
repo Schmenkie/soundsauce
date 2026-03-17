@@ -1,0 +1,32 @@
+{
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://us.i.posthog.com https://js.stripe.com https://w.soundcloud.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co https://*.blob.vercel-storage.com https://replicate.delivery https://lh3.googleusercontent.com https://i1.sndcdn.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://us.i.posthog.com https://api.replicate.com https://*.blob.vercel-storage.com https://vercel.com https://replicate.delivery https://api.stripe.com https://*.sentry.io https://api-v2.soundcloud.com; frame-src https://js.stripe.com https://w.soundcloud.com; media-src 'self' blob: https://*.blob.vercel-storage.com https://replicate.delivery https://*.sndcdn.com; font-src 'self' https://api.fontshare.com https://cdn.fontshare.com https://fonts.gstatic.com; worker-src 'self' blob:"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    }
+  ]
+}

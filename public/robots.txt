@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /settings
+Disallow: /admin
+Disallow: /messages
+
+Sitemap: https://soundsauce.app/sitemap.xml

@@ -1,0 +1,115 @@
+<svg width="1584" height="396" viewBox="0 0 1584 396" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff4d8d"/>
+      <stop offset="100%" stop-color="#ff6b35"/>
+    </linearGradient>
+    <linearGradient id="bar-grad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ff4d8d" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ff6b35"/>
+    </linearGradient>
+    <linearGradient id="text-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff4d8d"/>
+      <stop offset="100%" stop-color="#ff6b35"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1584" height="396" fill="url(#bg-grad)"/>
+
+  <!-- Subtle grid lines -->
+  <g stroke="#222222" stroke-width="0.5" opacity="0.4">
+    <line x1="0" y1="99" x2="1584" y2="99"/>
+    <line x1="0" y1="198" x2="1584" y2="198"/>
+    <line x1="0" y1="297" x2="1584" y2="297"/>
+    <line x1="396" y1="0" x2="396" y2="396"/>
+    <line x1="792" y1="0" x2="792" y2="396"/>
+    <line x1="1188" y1="0" x2="1188" y2="396"/>
+  </g>
+
+  <!-- Left waveform bars (decorative) -->
+  <g opacity="0.12">
+    <rect x="40" y="100" width="12" height="196" rx="6" fill="url(#bar-grad)"/>
+    <rect x="64" y="60" width="12" height="276" rx="6" fill="url(#bar-grad)"/>
+    <rect x="88" y="120" width="12" height="156" rx="6" fill="url(#bar-grad)"/>
+    <rect x="112" y="80" width="12" height="236" rx="6" fill="url(#bar-grad)"/>
+    <rect x="136" y="140" width="12" height="116" rx="6" fill="url(#bar-grad)"/>
+    <rect x="160" y="50" width="12" height="296" rx="6" fill="url(#bar-grad)"/>
+    <rect x="184" y="110" width="12" height="176" rx="6" fill="url(#bar-grad)"/>
+    <rect x="208" y="70" width="12" height="256" rx="6" fill="url(#bar-grad)"/>
+    <rect x="232" y="130" width="12" height="136" rx="6" fill="url(#bar-grad)"/>
+    <rect x="256" y="90" width="12" height="216" rx="6" fill="url(#bar-grad)"/>
+    <rect x="280" y="150" width="12" height="96" rx="6" fill="url(#bar-grad)"/>
+    <rect x="304" y="105" width="12" height="186" rx="6" fill="url(#bar-grad)"/>
+  </g>
+
+  <!-- Right waveform bars (decorative) -->
+  <g opacity="0.12">
+    <rect x="1268" y="105" width="12" height="186" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1292" y="150" width="12" height="96" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1316" y="90" width="12" height="216" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1340" y="130" width="12" height="136" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1364" y="70" width="12" height="256" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1388" y="110" width="12" height="176" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1412" y="50" width="12" height="296" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1436" y="140" width="12" height="116" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1460" y="80" width="12" height="236" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1484" y="120" width="12" height="156" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1508" y="60" width="12" height="276" rx="6" fill="url(#bar-grad)"/>
+    <rect x="1532" y="100" width="12" height="196" rx="6" fill="url(#bar-grad)"/>
+  </g>
+
+  <!-- Center content group -->
+  <!-- Logo icon -->
+  <g transform="translate(620, 60)">
+    <rect width="56" height="56" rx="11" fill="url(#accent-grad)"/>
+    <g stroke="white" stroke-width="3.5" stroke-linecap="round" fill="none">
+      <line x1="12" y1="21" x2="12" y2="35"/>
+      <line x1="19" y1="14" x2="19" y2="42"/>
+      <line x1="26" y1="9" x2="26" y2="47"/>
+      <line x1="33" y1="15" x2="33" y2="41"/>
+      <line x1="40" y1="19" x2="40" y2="37"/>
+      <line x1="47" y1="23" x2="47" y2="33"/>
+    </g>
+  </g>
+
+  <!-- "SoundSauce" text -->
+  <text x="700" y="112" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="52" font-weight="800" fill="white" text-anchor="start">
+    SoundSauce
+  </text>
+
+  <!-- Gradient divider line -->
+  <rect x="540" y="140" width="504" height="3" rx="1.5" fill="url(#accent-grad)"/>
+
+  <!-- Tagline -->
+  <text x="792" y="185" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="24" fill="#999999">
+    Hear a sound you love — learn how to make it
+  </text>
+
+  <!-- Feature pills -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="600">
+    <rect x="468" y="210" width="140" height="32" rx="16" fill="#262626" stroke="#333333" stroke-width="1"/>
+    <text x="538" y="231" text-anchor="middle" fill="#aaaaaa">Audio Analysis</text>
+
+    <rect x="628" y="210" width="140" height="32" rx="16" fill="#262626" stroke="#333333" stroke-width="1"/>
+    <text x="698" y="231" text-anchor="middle" fill="#aaaaaa">Sound Design</text>
+
+    <rect x="788" y="210" width="140" height="32" rx="16" fill="#262626" stroke="#333333" stroke-width="1"/>
+    <text x="858" y="231" text-anchor="middle" fill="#aaaaaa">Vital Presets</text>
+
+    <rect x="948" y="210" width="140" height="32" rx="16" fill="#262626" stroke="#333333" stroke-width="1"/>
+    <text x="1018" y="231" text-anchor="middle" fill="#aaaaaa">Community</text>
+  </g>
+
+  <!-- URL -->
+  <text x="792" y="300" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="18" font-weight="600" fill="url(#text-grad)">
+    soundsauce.app
+  </text>
+
+  <!-- Subtle bottom accent line -->
+  <rect x="0" y="390" width="1584" height="6" fill="url(#accent-grad)" opacity="0.4"/>
+</svg>

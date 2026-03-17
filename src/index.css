@@ -1,0 +1,453 @@
+@import "tailwindcss";
+
+@theme {
+  /* Ember (amber-based accent) color scale */
+  --color-ember-50: #FFFBEB;
+  --color-ember-100: #FEF3C7;
+  --color-ember-200: #FDE68A;
+  --color-ember-300: #FCD34D;
+  --color-ember-400: #FBBF24;
+  --color-ember-500: #F59E0B;
+  --color-ember-600: #D97706;
+  --color-ember-700: #B45309;
+  --color-ember-800: #92400E;
+  --color-ember-900: #78350F;
+
+  /* Typography */
+  --font-display: "Satoshi", "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "General Sans", "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg-primary: #09090B;
+  --bg-card: #18181B;
+  --bg-elevated: #27272A;
+  --border: #3F3F46;
+  --border-subtle: #27272A;
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+  --accent: #F59E0B;
+  --accent-hover: #D97706;
+  --accent-subtle: rgba(245, 158, 11, 0.15);
+  --accent-pink: #F59E0B;
+  --accent-orange: #F59E0B;
+  --success: #22C55E;
+  --error: #EF4444;
+  font-family: 'General Sans', 'DM Sans', system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="light"] {
+  --bg-primary: #FAFAF9;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #F5F5F4;
+  --border: #E7E5E4;
+  --border-subtle: #F5F5F4;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-muted: #A8A29E;
+  --accent: #D97706;
+  --accent-hover: #B45309;
+  --accent-subtle: rgba(217, 119, 6, 0.1);
+  --accent-pink: #D97706;
+  --accent-orange: #D97706;
+  --success: #16A34A;
+  --error: #DC2626;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-card);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Remove default input styling for range sliders */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  margin-top: -5px;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+
+/* ========== Sidebar Nav Icon Animations ========== */
+
+/* Home: gentle tilt/wiggle */
+@keyframes nav-home-wiggle {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+  75% { transform: rotate(-3deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* Analyze (Waves): wave pulse — scale Y oscillation */
+@keyframes nav-waves-pulse {
+  0% { transform: scaleY(1); }
+  30% { transform: scaleY(1.15); }
+  60% { transform: scaleY(0.92); }
+  100% { transform: scaleY(1); }
+}
+
+/* Discover (Compass): subtle rotation */
+@keyframes nav-compass-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(45deg); }
+}
+
+/* Search: scale up (magnifying glass zoom) */
+@keyframes nav-search-zoom {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+/* Bell (Notifications): ring/swing */
+@keyframes nav-bell-ring {
+  0% { transform: rotate(0deg); }
+  15% { transform: rotate(10deg); }
+  30% { transform: rotate(-8deg); }
+  45% { transform: rotate(6deg); }
+  60% { transform: rotate(-3deg); }
+  75% { transform: rotate(1deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* User (Profile): gentle bounce */
+@keyframes nav-user-bounce {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-3px); }
+  70% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+
+/* Settings (Gear): smooth rotation */
+@keyframes nav-settings-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(90deg); }
+}
+
+/* Admin (Shield): pulse/glow scale */
+@keyframes nav-admin-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.12); opacity: 0.85; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Message (MessageSquare): gentle wiggle/tilt */
+@keyframes nav-message-wiggle {
+  0% { transform: rotate(0deg); }
+  20% { transform: rotate(-8deg); }
+  40% { transform: rotate(6deg); }
+  60% { transform: rotate(-4deg); }
+  80% { transform: rotate(2deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* Trophy (Challenges): lift and shimmer */
+@keyframes nav-trophy-lift {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-3px) scale(1.1); }
+  70% { transform: translateY(-1px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* Presets (Sliders): gentle vertical slide */
+@keyframes nav-presets-slide {
+  0% { transform: translateY(0); }
+  30% { transform: translateY(-2px); }
+  60% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+
+/* Active state: subtle single pop on page load */
+@keyframes nav-active-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* Hover animation classes — applied to the icon wrapper span */
+.nav-icon-home:hover .nav-icon-target {
+  animation: nav-home-wiggle 300ms ease-in-out;
+}
+.nav-icon-waves:hover .nav-icon-target {
+  animation: nav-waves-pulse 280ms ease-in-out;
+  transform-origin: center;
+}
+.nav-icon-compass:hover .nav-icon-target {
+  animation: nav-compass-spin 300ms ease-out forwards;
+}
+.nav-icon-search:hover .nav-icon-target {
+  animation: nav-search-zoom 250ms ease-in-out;
+}
+.nav-icon-bell:hover .nav-icon-target {
+  animation: nav-bell-ring 300ms ease-in-out;
+  transform-origin: top center;
+}
+.nav-icon-user:hover .nav-icon-target {
+  animation: nav-user-bounce 280ms ease-out;
+}
+.nav-icon-settings:hover .nav-icon-target {
+  animation: nav-settings-rotate 300ms ease-out forwards;
+}
+.nav-icon-admin:hover .nav-icon-target {
+  animation: nav-admin-pulse 280ms ease-in-out;
+}
+.nav-icon-message:hover .nav-icon-target {
+  animation: nav-message-wiggle 300ms ease-in-out;
+}
+.nav-icon-trophy:hover .nav-icon-target {
+  animation: nav-trophy-lift 300ms ease-out;
+}
+.nav-icon-presets:hover .nav-icon-target {
+  animation: nav-presets-slide 300ms ease-in-out;
+}
+
+/* Active state animation — plays once on mount */
+.nav-icon-active .nav-icon-target {
+  animation: nav-active-pop 300ms ease-out;
+}
+
+/* Icon transition base — smooth return from hover transforms */
+.nav-icon-target {
+  transition: transform 150ms ease-out;
+  will-change: transform;
+}
+
+/* ========== Reduced Motion ========== */
+/* Disable ALL animations and transitions for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ========== Utility Animations ========== */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 400ms ease-out forwards;
+}
+
+/* Tab content fade-in slide-up */
+@keyframes tab-content-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-tab-content {
+  animation: tab-content-in 250ms ease-out forwards;
+}
+
+/* Toast slide-in from bottom-right */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.animate-toast-in {
+  animation: toast-in 250ms ease-out forwards;
+}
+
+/* Preset preview play button pulse */
+@keyframes preset-preview-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.preset-preview-pulse {
+  animation: preset-preview-pulse 1s ease-in-out infinite;
+}
+
+/* SoundCloud EQ visualizer bars */
+@keyframes eq-bounce {
+  0% { height: 20%; }
+  50% { height: 90%; }
+  100% { height: 40%; }
+}
+
+/* ========== SaucyHelper Mascot Animations ========== */
+
+@keyframes saucy-pop-in {
+  0% { opacity: 0; transform: scale(0.8) translateY(8px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes saucy-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes saucy-bar-1 {
+  0%, 100% { height: 8px; y: 8; }
+  50% { height: 12px; y: 6; }
+}
+
+@keyframes saucy-bar-2 {
+  0%, 100% { height: 14px; y: 5; }
+  50% { height: 8px; y: 8; }
+}
+
+@keyframes saucy-bar-3 {
+  0%, 100% { height: 10px; y: 7; }
+  50% { height: 14px; y: 5; }
+}
+
+@keyframes saucy-bar-4 {
+  0%, 100% { height: 6px; y: 9; }
+  50% { height: 10px; y: 7; }
+}
+
+/* ========== Preset Selector Slider Styling ========== */
+
+/* Slider wrapper for filled track effect */
+.preset-slider-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+/* Filled track overlay — shows progress from left to thumb position */
+.preset-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 1;
+}
+.preset-slider-fill.fill-dark {
+  background: #F59E0B;
+}
+.preset-slider-fill.fill-light {
+  background: #D97706;
+}
+
+/* Range input sits on top for interaction */
+.preset-slider {
+  position: relative;
+  z-index: 2;
+}
+
+/* Dark mode slider track */
+.preset-slider.slider-dark::-webkit-slider-runnable-track {
+  background: #3F3F46;
+  height: 6px;
+  border-radius: 3px;
+}
+.preset-slider.slider-dark::-moz-range-track {
+  background: #3F3F46;
+  height: 6px;
+  border-radius: 3px;
+}
+
+/* Light mode slider track */
+.preset-slider.slider-light::-webkit-slider-runnable-track {
+  background: #E7E5E4;
+  height: 6px;
+  border-radius: 3px;
+}
+.preset-slider.slider-light::-moz-range-track {
+  background: #E7E5E4;
+  height: 6px;
+  border-radius: 3px;
+}
+
+/* Thumb overrides for preset sliders */
+.preset-slider::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  transition: transform 0.15s ease;
+}
+.preset-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.preset-slider.slider-dark::-webkit-slider-thumb {
+  background: #F59E0B;
+  border-color: #F59E0B;
+}
+.preset-slider.slider-light::-webkit-slider-thumb {
+  background: #D97706;
+  border-color: #D97706;
+}
+
+.preset-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.preset-slider.slider-dark::-moz-range-thumb {
+  background: #F59E0B;
+  border-color: #F59E0B;
+}
+.preset-slider.slider-light::-moz-range-thumb {
+  background: #D97706;
+  border-color: #D97706;
+}
+
+/* Firefox filled track */
+.preset-slider.slider-dark::-moz-range-progress {
+  background: #F59E0B;
+  height: 6px;
+  border-radius: 3px;
+}
+.preset-slider.slider-light::-moz-range-progress {
+  background: #D97706;
+  height: 6px;
+  border-radius: 3px;
+}
