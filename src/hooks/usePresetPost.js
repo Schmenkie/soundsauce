@@ -51,11 +51,15 @@ export function usePresetPost() {
       const safeName = title.trim().replace(/[^a-zA-Z0-9]/g, '_');
 
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+
       const res = await fetch('/api/upload-preset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ presetData: fileText, filename: safeName }),
       });

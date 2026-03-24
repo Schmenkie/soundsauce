@@ -50,7 +50,7 @@ export default function App() {
   return (
     <ErrorBoundary theme={theme}>
       <ToastProvider theme={theme}>
-      <PageLayout theme={theme}>
+      <PageLayout theme={theme} onToggleTheme={handleThemeToggle}>
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route path="/" element={<Home theme={theme} t={t} />} />

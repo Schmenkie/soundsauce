@@ -5,7 +5,7 @@ import { motion, useMotionValue, useTransform, useSpring, AnimatePresence } from
 import {
   Home, Waves, Compass, Search, Bell, MessageSquare,
   User, LogIn, LogOut, Settings as SettingsIcon, Shield,
-  Trophy, Sliders, Zap, MessageCircle
+  Trophy, Sliders, Zap, MessageCircle, Sun, Moon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { AuthModal } from '../auth';
@@ -116,8 +116,8 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseX, onClick }) {
         <div className={`mt-1 w-1 h-1 rounded-full ${isDark ? 'bg-ember-500' : 'bg-amber-600'}`} />
       )}
 
-      {/* Tooltip */}
-      <div className={`absolute -top-10 left-1/2 -translate-x-1/2 px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-10 ${
+      {/* Tooltip — hidden on mobile/touch (no hover state) */}
+      <div className={`absolute -top-10 left-1/2 -translate-x-1/2 px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-10 hidden md:block ${
         isDark ? 'bg-zinc-800 text-zinc-100 border border-zinc-700' : 'bg-stone-800 text-white'
       }`}>
         {label}
@@ -135,7 +135,7 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseX, onClick }) {
  *
  * Layout: [Home] [Analyze] [Discover] [Search] | [Messages] [Notifications] | [Profile] [Presets] [Challenges] [Settings] [Admin?] | [Avatar]
  */
-export function Dock({ theme }) {
+export function Dock({ theme, onToggleTheme, hidden }) {
   const mouseX = useMotionValue(Infinity);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -210,7 +210,13 @@ export function Dock({ theme }) {
 
   return (
     <>
-      <nav className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50" aria-label="Main navigation">
+      <motion.nav
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50"
+        aria-label="Main navigation"
+        initial={false}
+        animate={{ y: hidden ? 100 : 0, opacity: hidden ? 0 : 1 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      >
         <motion.div
           onMouseMove={(e) => mouseX.set(e.pageX)}
           onMouseLeave={() => mouseX.set(Infinity)}
@@ -220,26 +226,44 @@ export function Dock({ theme }) {
               : 'bg-white/70 border-stone-200/60 shadow-stone-300/30'
           }`}
         >
-          {/* Core navigation */}
+          {/* Core navigation — always visible */}
           {coreItems.map((item) => (
             <DockIcon key={item.to} {...item} theme={theme} mouseX={mouseX} />
           ))}
 
-          {/* Separator + badge items (messages/notifications) */}
+          {/* Badge items (messages/notifications) — visible on mobile with combined badge, full on desktop */}
           {badgeItems.length > 0 && (
-            <div className={`w-px self-stretch my-2 ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+            <>
+              <div className={`w-px self-stretch my-2 hidden md:block ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+              {/* Mobile: show notifications only (with combined badge count) */}
+              <div className="md:hidden">
+                <DockIcon
+                  to="/notifications"
+                  icon={Bell}
+                  label="Notifications"
+                  badge={(unreadNotifications || 0) + (unreadMessages || 0)}
+                  theme={theme}
+                  mouseX={mouseX}
+                />
+              </div>
+              {/* Desktop: show both */}
+              <div className="hidden md:contents">
+                {badgeItems.map((item) => (
+                  <DockIcon key={item.to} {...item} theme={theme} mouseX={mouseX} />
+                ))}
+              </div>
+            </>
           )}
-          {badgeItems.map((item) => (
-            <DockIcon key={item.to} {...item} theme={theme} mouseX={mouseX} />
-          ))}
 
-          {/* Separator + user items (profile/presets/challenges/settings/admin) */}
+          {/* User items (presets/challenges/settings/admin) — desktop only */}
           {userItems.length > 0 && (
-            <div className={`w-px self-stretch my-2 ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+            <div className="hidden md:contents">
+              <div className={`w-px self-stretch my-2 ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+              {userItems.map((item) => (
+                <DockIcon key={item.to} {...item} theme={theme} mouseX={mouseX} />
+              ))}
+            </div>
           )}
-          {userItems.map((item) => (
-            <DockIcon key={item.to} {...item} theme={theme} mouseX={mouseX} />
-          ))}
 
           {/* Separator before avatar */}
           <div className={`w-px self-stretch my-2 ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
@@ -276,8 +300,8 @@ export function Dock({ theme }) {
                     <Zap className="w-2.5 h-2.5 text-zinc-950" />
                   </span>
                 )}
-                {/* Tooltip */}
-                <div className={`absolute -top-10 left-1/2 -translate-x-1/2 px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-10 ${
+                {/* Tooltip — hidden on mobile/touch */}
+                <div className={`absolute -top-10 left-1/2 -translate-x-1/2 px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-10 hidden md:block ${
                   isDark ? 'bg-zinc-800 text-zinc-100 border border-zinc-700' : 'bg-stone-800 text-white'
                 }`}>
                   {profile?.username || 'Menu'}
@@ -317,7 +341,7 @@ export function Dock({ theme }) {
                       </div>
                     </div>
 
-                    {/* Profile + Feedback + Sign Out */}
+                    {/* Navigation + Actions */}
                     <div className="py-1">
                       <Link
                         to="/profile"
@@ -330,6 +354,49 @@ export function Dock({ theme }) {
                         <User className="w-4 h-4" />
                         View Profile
                       </Link>
+                      {/* Mobile-only nav items (hidden from dock on small screens) */}
+                      <Link
+                        to="/messages"
+                        role="menuitem"
+                        onClick={() => setMenuOpen(false)}
+                        className={`flex items-center gap-3 w-full px-4 py-2.5 text-sm transition-colors md:hidden ${
+                          isDark ? 'text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800/50' : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'
+                        }`}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        Messages
+                        {unreadMessages > 0 && (
+                          <span className="ml-auto min-w-[18px] h-4 text-[10px] font-bold flex items-center justify-center bg-ember-500 text-zinc-950 rounded-full px-1">
+                            {unreadMessages}
+                          </span>
+                        )}
+                      </Link>
+                      {userItems.map(item => (
+                        <Link
+                          key={item.to}
+                          to={item.to}
+                          role="menuitem"
+                          onClick={() => setMenuOpen(false)}
+                          className={`flex items-center gap-3 w-full px-4 py-2.5 text-sm transition-colors md:hidden ${
+                            isDark ? 'text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800/50' : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'
+                          }`}
+                        >
+                          <item.icon className="w-4 h-4" />
+                          {item.label}
+                        </Link>
+                      ))}
+                      {onToggleTheme && (
+                        <button
+                          role="menuitem"
+                          onClick={() => { onToggleTheme(); setMenuOpen(false); }}
+                          className={`flex items-center gap-3 w-full px-4 py-2.5 text-sm transition-colors ${
+                            isDark ? 'text-zinc-400 hover:text-zinc-50 hover:bg-zinc-800/50' : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'
+                          }`}
+                        >
+                          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                          {isDark ? 'Light Mode' : 'Dark Mode'}
+                        </button>
+                      )}
                       <button
                         role="menuitem"
                         onClick={() => { setFeedbackOpen(true); setMenuOpen(false); }}
@@ -379,7 +446,7 @@ export function Dock({ theme }) {
             <div className="w-11 h-11" />
           )}
         </motion.div>
-      </nav>
+      </motion.nav>
 
       {/* Auth Modal */}
       <AuthModal

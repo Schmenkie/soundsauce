@@ -339,49 +339,53 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
 
   return (
     <div className={`${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-stone-200'} border rounded-lg overflow-hidden`}>
-      {/* Header */}
-      <div className={`px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-zinc-700' : 'border-stone-200'}`}>
-        <div className="flex items-center gap-2">
-          <Music className={`w-5 h-5 ${isDark ? 'text-ember-500' : 'text-ember-600'}`} />
-          <h3 className={`font-bold ${t.text}`}>Vital Presets</h3>
-          <a
-            href="https://vital.audio/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`text-xs font-medium flex items-center gap-0.5 ${isDark ? 'text-zinc-500 hover:text-zinc-400' : 'text-zinc-400 hover:text-ember-600'}`}
-          >
-            Get Vital <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
-        {selectedPresetId && (
+      {/* Header — stacks on mobile */}
+      <div className={`px-4 py-3 border-b ${isDark ? 'border-zinc-700' : 'border-stone-200'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            {showDuplicateWarning && (
-              <span className={`text-xs ${isDark ? 'text-ember-500' : 'text-ember-600'}`}>
-                Already in your library
-              </span>
-            )}
-            <button
-              onClick={showDuplicateWarning ? executeDownload : handleDownload}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all ${
-                isDark
-                  ? 'bg-white text-black hover:bg-stone-200'
-                  : 'bg-ember-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
-              }`}
+            <Music className={`w-5 h-5 ${isDark ? 'text-ember-500' : 'text-ember-600'}`} />
+            <h3 className={`font-bold ${t.text}`}>Vital Presets</h3>
+            <a
+              href="https://vital.audio/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`text-xs font-medium flex items-center gap-0.5 ${isDark ? 'text-zinc-500 hover:text-zinc-400' : 'text-zinc-400 hover:text-ember-600'}`}
             >
-              {hasDownloadedPreset?.(selectedPresetId) ? (
-                <>
-                  <Check className="w-4 h-4" />
-                  {showDuplicateWarning ? 'Download again' : 'Download .vital'}
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  Download .vital
-                </>
-              )}
-            </button>
+              Get Vital <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
-        )}
+          {selectedPresetId && (
+            <div className="flex items-center gap-2">
+              {showDuplicateWarning && (
+                <span className={`text-xs ${isDark ? 'text-ember-500' : 'text-ember-600'}`}>
+                  Already in your library
+                </span>
+              )}
+              <button
+                onClick={showDuplicateWarning ? executeDownload : handleDownload}
+                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-all whitespace-nowrap ${
+                  isDark
+                    ? 'bg-white text-black hover:bg-stone-200'
+                    : 'bg-ember-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
+                }`}
+              >
+                {hasDownloadedPreset?.(selectedPresetId) ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span className="hidden sm:inline">{showDuplicateWarning ? 'Download again' : 'Download .vital'}</span>
+                    <span className="sm:hidden">.vital</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Download .vital</span>
+                    <span className="sm:hidden">.vital</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Category Pills */}

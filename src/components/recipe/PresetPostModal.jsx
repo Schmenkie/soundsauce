@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { X, Send, Tag, Upload, FileMusic, Loader, AlertCircle } from 'lucide-react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
@@ -28,6 +28,12 @@ export function PresetPostModal({ isOpen, onClose, onSubmit, theme, status, erro
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
+
+  // Hide dock when modal is open
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('dock-visibility', { detail: { hidden: isOpen } }));
+    return () => window.dispatchEvent(new CustomEvent('dock-visibility', { detail: { hidden: false } }));
+  }, [isOpen]);
 
   const t = theme === 'dark' ? {
     overlay: 'bg-black/70',
