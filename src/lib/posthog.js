@@ -21,7 +21,8 @@ export function initPostHog() {
     .then((mod) => {
       posthog = mod.default;
       posthog.init(apiKey, {
-        api_host: import.meta.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com',
+        api_host: import.meta.env.VITE_POSTHOG_HOST || '/ingest',
+        ui_host: 'https://us.posthog.com',
         person_profiles: 'identified_only',
         capture_pageview: false, // We handle this manually with React Router
         capture_pageleave: true,
@@ -37,6 +38,8 @@ export function initPostHog() {
           flushQueue();
         },
       });
+      // Tag every event so the multi-project data hub can filter by app
+      posthog.register({ app: 'soundsauce' });
     })
     .catch((err) => {
       console.warn('PostHog: failed to load (likely blocked by ad blocker)', err);
@@ -339,4 +342,9 @@ export function trackFeedbackSubmitted(type, page) {
 
 export function trackFeedbackOpened(page) {
   capture('feedback_opened', { page });
+}
+
+// Share
+export function trackShareClicked(method, instrument) {
+  capture('share_clicked', { method, instrument });
 }
