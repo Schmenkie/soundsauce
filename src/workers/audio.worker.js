@@ -235,58 +235,82 @@ function detectBPM(channelData, sampleRate) {
 // =============================================================================
 
 function detectKey(channelData, sampleRate) {
-  const windowSize = 4096;
-  const hopSize = windowSize / 2;
-  const numWindows = Math.floor((channelData.length - windowSize) / hopSize);
-
-  if (numWindows === 0) return null;
+  // 8192-point windows give ~5.4 Hz bins at 44.1k — enough to separate semitones down to
+  // C2 (65 Hz) where the bass lives. Windows are spread evenly across the WHOLE track
+  // (the previous version only looked at the first ~1.4 seconds — i.e. the intro).
+  const windowSize = 8192;
+  if (channelData.length < windowSize) return null;
 
   const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const freqResolution = sampleRate / windowSize;
 
-  const windowsToProcess = Math.min(numWindows, 30);
+  const maxWindows = 200;
+  const available = Math.floor((channelData.length - windowSize) / (windowSize / 2)) + 1;
+  const windowsToProcess = Math.min(available, maxWindows);
+  const stride = windowsToProcess > 1 ? (channelData.length - windowSize) / (windowsToProcess - 1) : 0;
+
   const chromaPerWindow = [];
   const windowEnergies = [];
 
   for (let w = 0; w < windowsToProcess; w++) {
-    const start = w * hopSize;
-    const windowData = channelData.slice(start, start + windowSize);
-
+    const start = Math.floor(w * stride);
+    const windowData = channelData.subarray(start, start + windowSize);
     const magnitudes = computeMagnitudeSpectrum(windowData, windowSize);
 
     const chroma = new Array(12).fill(0);
     let windowEnergy = 0;
 
-    for (let i = 1; i < magnitudes.length; i++) {
-      const freq = i * freqResolution;
-      if (freq < 80 || freq > 4000) continue;
+    // Harmonic pitch-class profile: only spectral PEAKS contribute (broadband drums and
+    // noise otherwise fill all twelve bins), and each peak also votes for the pitch classes
+    // of the fundamentals it could be a harmonic of (f/2, f/3, f/4) with decaying weight,
+    // which pulls energy back onto roots. The bass register gets a boost — in club music
+    // the bassline states the key.
+    const loBin = Math.ceil(65 / freqResolution);
+    const hiBin = Math.min(magnitudes.length - 2, Math.floor(2100 / freqResolution));
+    let windowMax = 0;
+    for (let i = loBin; i <= hiBin; i++) if (magnitudes[i] > windowMax) windowMax = magnitudes[i];
+    const peakFloor = windowMax * 0.02;
 
+    for (let i = loBin; i <= hiBin; i++) {
       const mag = magnitudes[i];
-      windowEnergy += mag * mag;
+      windowEnergy += mag;
+      if (mag < peakFloor || mag <= magnitudes[i - 1] || mag < magnitudes[i + 1]) continue;
 
-      const semitone = 12 * Math.log2(freq / 440);
-      const noteIndex = Math.round(semitone) % 12;
-      const pitchClass = ((noteIndex % 12) + 12) % 12;
-      chroma[pitchClass] += mag * mag;
+      // Parabolic interpolation for a sub-bin frequency estimate
+      const a = magnitudes[i - 1], b = mag, c = magnitudes[i + 1];
+      const denom = a - 2 * b + c;
+      const shift = denom !== 0 ? 0.5 * (a - c) / denom : 0;
+      const freq = (i + shift) * freqResolution;
+
+      const weight = Math.sqrt(mag) * (freq < 260 ? 1.6 : 1);
+      for (let h = 1; h <= 4; h++) {
+        const f0 = freq / h;
+        if (f0 < 30) break;
+        const semitoneFromA = 12 * Math.log2(f0 / 440);
+        const pitchClass = (((Math.round(semitoneFromA) + 9) % 12) + 12) % 12;
+        chroma[pitchClass] += weight * Math.pow(0.6, h - 1);
+      }
     }
 
     chromaPerWindow.push(chroma);
     windowEnergies.push(windowEnergy);
   }
 
-  const totalEnergy = windowEnergies.reduce((a, b) => a + b, 0);
+  // Skip near-silent windows (intros/outros) so they don't dilute the estimate
+  const meanEnergy = windowEnergies.reduce((a, b) => a + b, 0) / windowEnergies.length;
   const avgChroma = new Array(12).fill(0);
+  let used = 0;
   for (let i = 0; i < chromaPerWindow.length; i++) {
-    const weight = totalEnergy > 0 ? windowEnergies[i] / totalEnergy : 1 / chromaPerWindow.length;
-    for (let j = 0; j < 12; j++) {
-      avgChroma[j] += chromaPerWindow[i][j] * weight;
-    }
+    if (windowEnergies[i] < meanEnergy * 0.15) continue;
+    for (let j = 0; j < 12; j++) avgChroma[j] += chromaPerWindow[i][j];
+    used++;
   }
+  if (used === 0) return null;
 
   const maxChroma = Math.max(...avgChroma);
   const normalizedChroma = avgChroma.map(c => maxChroma > 0 ? c / maxChroma : 0);
 
-  // Krumhansl-Schmuckler key profiles
+  // Krumhansl-Schmuckler key profiles (index 0 = tonic)
   const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
   const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
 
@@ -306,33 +330,22 @@ function detectKey(channelData, sampleRate) {
     return denA > 0 && denB > 0 ? num / Math.sqrt(denA * denB) : 0;
   };
 
-  const rotateArray = (arr, shift) => {
-    const n = arr.length;
-    return arr.map((_, i) => arr[(i + shift) % n]);
-  };
-
-  let bestKey = null;
-  let bestCorr = -Infinity;
-
-  for (let i = 0; i < 12; i++) {
-    const rotatedChroma = rotateArray(normalizedChroma, i);
-
-    const majorCorr = correlate(rotatedChroma, majorProfile);
-    if (majorCorr > bestCorr) {
-      bestCorr = majorCorr;
-      bestKey = { note: noteNames[(12 - i) % 12], mode: 'major', index: (12 - i) % 12 };
-    }
-
-    const minorCorr = correlate(rotatedChroma, minorProfile);
-    if (minorCorr > bestCorr) {
-      bestCorr = minorCorr;
-      bestKey = { note: noteNames[(12 - i) % 12], mode: 'minor', index: (12 - i) % 12 };
-    }
+  // For each candidate tonic, rotate the chroma so that tonic sits at index 0
+  const candidates = [];
+  for (let tonic = 0; tonic < 12; tonic++) {
+    const rotated = normalizedChroma.map((_, j) => normalizedChroma[(j + tonic) % 12]);
+    candidates.push({ note: noteNames[tonic], index: tonic, mode: 'major', corr: correlate(rotated, majorProfile) });
+    candidates.push({ note: noteNames[tonic], index: tonic, mode: 'minor', corr: correlate(rotated, minorProfile) });
   }
+  candidates.sort((a, b) => b.corr - a.corr);
 
-  if (!bestKey) return null;
-
-  const confidence = Math.min(100, Math.round((bestCorr + 1) * 50));
+  const bestKey = candidates[0];
+  const bestCorr = bestKey.corr;
+  // Confidence blends absolute fit with the margin over the runner-up. A clear key gives
+  // ~0.8+ correlation and a decent gap; ambiguous material collapses towards 50.
+  const margin = bestCorr - candidates[1].corr;
+  const confidence = Math.max(0, Math.min(100, Math.round(50 + bestCorr * 35 + margin * 150)));
+  const alternatives = candidates.slice(1, 4).map(c => ({ key: c.note, mode: c.mode, corr: Math.round(c.corr * 100) / 100 }));
 
   // Generate scale notes
   const majorIntervals = [0, 2, 4, 5, 7, 9, 11];
@@ -378,6 +391,7 @@ function detectKey(channelData, sampleRate) {
     scaleNotes,
     camelot,
     confidence,
+    alternatives,
     compatibleKeys,
     chroma: noteNames.map((note, i) => ({ note, value: normalizedChroma[i] }))
   };

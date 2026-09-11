@@ -59,13 +59,27 @@ export function sanitizeForFilename(value) {
 }
 
 /**
+ * Conventional enharmonic spelling. The detector reports sharps; musicians say Bb, Eb, Ab,
+ * Db for those keys (and Eb/Bb minor), while C#, F#, G# minor stay sharp.
+ */
+const FLAT_SPELLING = {
+  major: { 'C#': 'Db', 'D#': 'Eb', 'G#': 'Ab', 'A#': 'Bb' },
+  minor: { 'D#': 'Eb', 'A#': 'Bb' },
+};
+export function displayKeyName(keyInfo) {
+  if (!keyInfo?.key) return '';
+  const table = FLAT_SPELLING[keyInfo.mode === 'minor' ? 'minor' : 'major'];
+  return table[keyInfo.key] || keyInfo.key;
+}
+
+/**
  * Short key token for filenames: "Am", "F#", "Bbm".
  * @param {{ key?: string, mode?: string } | null} keyInfo
  */
 export function formatKeyToken(keyInfo) {
   if (!keyInfo?.key) return null;
   const suffix = keyInfo.mode === 'minor' ? 'm' : '';
-  return `${keyInfo.key}${suffix}`;
+  return `${displayKeyName(keyInfo)}${suffix}`;
 }
 
 /**
@@ -119,7 +133,10 @@ export function buildPackNotes(meta, stemTypes, mode) {
     }
   }
   if (meta?.key?.key) {
-    lines.push(`Key: ${meta.key.key} ${meta.key.mode}${meta.key.camelot ? ` (Camelot ${meta.key.camelot})` : ''}`);
+    lines.push(`Key: ${displayKeyName(meta.key)} ${meta.key.mode}${meta.key.camelot ? ` (Camelot ${meta.key.camelot})` : ''}${meta.key.confidence != null ? ` — confidence ${meta.key.confidence}%` : ''}`);
+    if (Array.isArray(meta.key.alternatives) && meta.key.alternatives.length) {
+      lines.push(`  Also plausible: ${meta.key.alternatives.map(a => `${displayKeyName(a)} ${a.mode}`).join(', ')}`);
+    }
     if (Array.isArray(meta.key.compatibleKeys) && meta.key.compatibleKeys.length) {
       lines.push('  Compatible keys:');
       for (const ck of meta.key.compatibleKeys) {
