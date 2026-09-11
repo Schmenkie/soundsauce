@@ -7,3 +7,4 @@ export { InstrumentIllustration } from './InstrumentIllustration';
 export { ToastProvider, useToast } from './Toast';
 export { SkeletonBlock, SkeletonCircle, SkeletonPill, SkeletonCard } from './Skeleton';
 export { SaucyHelper } from './SaucyHelper';
+export { MiniSpectrum } from './MiniSpectrum';

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { spectrumColor } from '../../utils/spectrum';
 import { ZoomIn, ZoomOut, Repeat, X, RotateCcw, Scissors } from 'lucide-react';
 
 // Zoom snap levels for button controls
@@ -11,6 +12,7 @@ const ZOOM_SNAPS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 export function WaveformVisualizer({
   waveformData,
   waveformHiResRef,
+  waveformColorRef, // { colors: Float32Array (t per column, -1 = silence), numColumns } — Signal Deck colouring
   duration,
   playbackTime,
   playbackTimeRef,
@@ -65,25 +67,72 @@ export function WaveformVisualizer({
 
   // Theme colors
   const colors = useMemo(() => ({
-    waveform: theme === 'dark' ? '#52525B' : '#A8A29E',
-    waveformPlayed: '#F59E0B',
-    playhead: '#F59E0B',
+    waveform: theme === 'dark' ? '#3A414B' : '#B8BEC7',
+    waveformPlayed: theme === 'dark' ? '#E8ECF1' : '#0F1216',
+    playhead: '#FACC15',
     centerLine: theme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
     loopFill: loopEnabled
-      ? (theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(245,158,11,0.08)')
-      : (theme === 'dark' ? 'rgba(82,82,91,0.2)' : 'rgba(0,0,0,0.05)'),
+      ? 'rgba(250,204,21,0.10)'
+      : (theme === 'dark' ? 'rgba(232,236,241,0.06)' : 'rgba(15,18,22,0.05)'),
     loopBorder: loopEnabled
-      ? (theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(217,119,6,0.4)')
-      : (theme === 'dark' ? 'rgba(82,82,91,0.5)' : 'rgba(0,0,0,0.2)'),
-    minimapBg: theme === 'dark' ? '#18181B' : '#F5F5F4',
-    minimapWaveform: theme === 'dark' ? '#27272A' : '#D6D3D1',
-    minimapViewport: theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(217,119,6,0.15)',
-    minimapViewportBorder: theme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(217,119,6,0.4)',
-    timeText: theme === 'dark' ? '#71717A' : '#A1A1AA',
+      ? 'rgba(250,204,21,0.7)'
+      : (theme === 'dark' ? 'rgba(232,236,241,0.35)' : 'rgba(15,18,22,0.25)'),
+    minimapBg: theme === 'dark' ? '#0D0F12' : '#EDEFF3',
+    minimapWaveform: theme === 'dark' ? '#242A33' : '#CDD2DA',
+    minimapViewport: theme === 'dark' ? 'rgba(250,204,21,0.10)' : 'rgba(202,138,4,0.12)',
+    minimapViewportBorder: theme === 'dark' ? 'rgba(250,204,21,0.55)' : 'rgba(202,138,4,0.5)',
+    timeText: theme === 'dark' ? '#7C8794' : '#6B7280',
   }), [theme, loopEnabled]);
 
   // === Viewport helpers ===
   const getVisibleDuration = useCallback(() => duration / zoom, [duration, zoom]);
+
+  // === Signal Deck colouring ===
+  // Colour for the column at absolute time tAbs. Quantised to 32 levels and cached so the
+  // 60fps overlay doesn't build strings every frame. Returns a neutral when no colour data.
+  const colorCacheRef = useRef(new Map());
+  const columnColor = useCallback((tAbs, alpha, neutral) => {
+    const map = waveformColorRef?.current;
+    if (!map || !map.colors || !duration) return neutral;
+    const idx = Math.min(map.numColumns - 1, Math.max(0, Math.floor((tAbs / duration) * map.numColumns)));
+    const v = map.colors[idx];
+    if (v < 0) return neutral;
+    const q = Math.round(v * 31);
+    const key = q * 4 + (alpha >= 1 ? 3 : alpha >= 0.6 ? 2 : 1);
+    let c = colorCacheRef.current.get(key);
+    if (!c) {
+      c = spectrumColor(q / 31, alpha);
+      colorCacheRef.current.set(key, c);
+    }
+    return c;
+  }, [waveformColorRef, duration]);
+
+  /**
+   * Stroke one 1px vertical segment per pixel column, batching consecutive columns of the
+   * same colour into a single path.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} fromPx @param {number} toPx
+   * @param {(px:number) => [number, number]|null} segmentAt - returns [yTop, yBot] or null
+   * @param {(px:number) => string} colorAt
+   */
+  const strokeColumns = (ctx, fromPx, toPx, segmentAt, colorAt) => {
+    let current = null;
+    ctx.lineWidth = 1;
+    for (let px = fromPx; px < toPx; px++) {
+      const seg = segmentAt(px);
+      if (!seg) continue;
+      const c = colorAt(px);
+      if (c !== current) {
+        if (current !== null) ctx.stroke();
+        ctx.beginPath();
+        ctx.strokeStyle = c;
+        current = c;
+      }
+      ctx.moveTo(px + 0.5, seg[0]);
+      ctx.lineTo(px + 0.5, seg[1]);
+    }
+    if (current !== null) ctx.stroke();
+  };
 
   const getVisibleStart = useCallback(() => {
     const maxStart = Math.max(0, duration - getVisibleDuration());
@@ -161,79 +210,47 @@ export function WaveformVisualizer({
 
     const hiRes = waveformHiResRef?.current;
 
+    const visStart = getVisibleStart();
+    const visDur = getVisibleDuration();
+    // Unplayed waveform sits at ~55% so the played portion (full colour) reads as progress
+    const dimAlpha = theme === 'dark' ? 0.55 : 0.7;
+    const colorAt = (px) => columnColor(visStart + ((px + 0.5) / width) * visDur, dimAlpha, colors.waveform);
+
     if (hiRes && hiRes.numBlocks > 0) {
       // Hi-res min/max rendering
-      const visStart = getVisibleStart();
-      const visDur = getVisibleDuration();
-
-      ctx.strokeStyle = colors.waveform;
-      ctx.lineWidth = 1;
-
-      ctx.beginPath();
-      for (let px = 0; px < width; px++) {
+      strokeColumns(ctx, 0, width, (px) => {
         const t0 = visStart + (px / width) * visDur;
         const t1 = visStart + ((px + 1) / width) * visDur;
-
-        // Convert time to block indices
         const sampleStart = Math.max(0, Math.floor(t0 * hiRes.sampleRate));
         const sampleEnd = Math.min(hiRes.totalSamples, Math.ceil(t1 * hiRes.sampleRate));
-
         const blockStart = Math.floor(sampleStart / hiRes.blockSize);
         const blockEnd = Math.min(hiRes.numBlocks - 1, Math.ceil(sampleEnd / hiRes.blockSize));
-
-        if (blockStart > blockEnd || blockStart >= hiRes.numBlocks) continue;
-
-        let minVal = Infinity;
-        let maxVal = -Infinity;
-
+        if (blockStart > blockEnd || blockStart >= hiRes.numBlocks) return null;
+        let minVal = Infinity, maxVal = -Infinity;
         for (let b = blockStart; b <= blockEnd; b++) {
           if (hiRes.mins[b] < minVal) minVal = hiRes.mins[b];
           if (hiRes.maxes[b] > maxVal) maxVal = hiRes.maxes[b];
         }
-
-        if (minVal === Infinity) continue;
-
-        const yTop = centerY - maxVal * centerY;
-        const yBot = centerY - minVal * centerY;
-
-        // Ensure at least 1px height
-        const drawTop = Math.min(yTop, centerY - 0.5);
-        const drawBot = Math.max(yBot, centerY + 0.5);
-
-        ctx.moveTo(px + 0.5, drawTop);
-        ctx.lineTo(px + 0.5, drawBot);
-      }
-      ctx.stroke();
+        if (minVal === Infinity) return null;
+        return [Math.min(centerY - maxVal * centerY, centerY - 0.5), Math.max(centerY - minVal * centerY, centerY + 0.5)];
+      }, colorAt);
     } else if (waveformData && waveformData.length > 0) {
-      // Fallback: 200-point preview (upward bars from center, mirrored)
-      ctx.strokeStyle = colors.waveform;
-      ctx.lineWidth = 1;
-
-      const visStart = getVisibleStart();
-      const visDur = getVisibleDuration();
-
-      ctx.beginPath();
-      for (let px = 0; px < width; px++) {
+      // Fallback: 200-point preview (mirrored)
+      strokeColumns(ctx, 0, width, (px) => {
         const t0 = visStart + (px / width) * visDur;
         const t1 = visStart + ((px + 1) / width) * visDur;
-
         const idx0 = Math.floor((t0 / duration) * waveformData.length);
         const idx1 = Math.ceil((t1 / duration) * waveformData.length);
-
-        if (idx0 >= waveformData.length || idx1 < 0) continue;
-
+        if (idx0 >= waveformData.length || idx1 < 0) return null;
         let maxVal = 0;
         for (let i = Math.max(0, idx0); i < Math.min(waveformData.length, idx1); i++) {
           if (waveformData[i] > maxVal) maxVal = waveformData[i];
         }
-
         const halfH = maxVal * centerY;
-        ctx.moveTo(px + 0.5, centerY - halfH);
-        ctx.lineTo(px + 0.5, centerY + halfH);
-      }
-      ctx.stroke();
+        return [centerY - halfH, centerY + halfH];
+      }, colorAt);
     }
-  }, [duration, colors, waveformData, waveformHiResRef, getVisibleStart, getVisibleDuration]);
+  }, [duration, colors, waveformData, waveformHiResRef, getVisibleStart, getVisibleDuration, columnColor, theme]);
 
   // === Overlay drawing (animated layer) ===
   const drawOverlay = useCallback((currentTime) => {
@@ -334,59 +351,40 @@ export function WaveformVisualizer({
         ctx.rect(0, 0, Math.min(playX, width), height);
         ctx.clip();
 
-        ctx.strokeStyle = colors.waveformPlayed;
-        ctx.lineWidth = 1;
+        const endPx = Math.min(Math.ceil(playX), width);
+        const playedColorAt = (px) => columnColor(visStart + ((px + 0.5) / width) * visDur, 1, colors.waveformPlayed);
 
         if (hiRes && hiRes.numBlocks > 0) {
-          ctx.beginPath();
-          const endPx = Math.min(Math.ceil(playX), width);
-          for (let px = 0; px < endPx; px++) {
+          strokeColumns(ctx, 0, endPx, (px) => {
             const t0 = visStart + (px / width) * visDur;
             const t1 = visStart + ((px + 1) / width) * visDur;
-
             const sampleStart = Math.max(0, Math.floor(t0 * hiRes.sampleRate));
             const sampleEnd = Math.min(hiRes.totalSamples, Math.ceil(t1 * hiRes.sampleRate));
             const blockStart = Math.floor(sampleStart / hiRes.blockSize);
             const blockEnd = Math.min(hiRes.numBlocks - 1, Math.ceil(sampleEnd / hiRes.blockSize));
-
-            if (blockStart > blockEnd || blockStart >= hiRes.numBlocks) continue;
-
-            let minVal = Infinity;
-            let maxVal = -Infinity;
+            if (blockStart > blockEnd || blockStart >= hiRes.numBlocks) return null;
+            let minVal = Infinity, maxVal = -Infinity;
             for (let b = blockStart; b <= blockEnd; b++) {
               if (hiRes.mins[b] < minVal) minVal = hiRes.mins[b];
               if (hiRes.maxes[b] > maxVal) maxVal = hiRes.maxes[b];
             }
-            if (minVal === Infinity) continue;
-
-            const yTop = centerY - maxVal * centerY;
-            const yBot = centerY - minVal * centerY;
-            const drawTop = Math.min(yTop, centerY - 0.5);
-            const drawBot = Math.max(yBot, centerY + 0.5);
-
-            ctx.moveTo(px + 0.5, drawTop);
-            ctx.lineTo(px + 0.5, drawBot);
-          }
-          ctx.stroke();
+            if (minVal === Infinity) return null;
+            return [Math.min(centerY - maxVal * centerY, centerY - 0.5), Math.max(centerY - minVal * centerY, centerY + 0.5)];
+          }, playedColorAt);
         } else if (waveformData && waveformData.length > 0) {
-          ctx.beginPath();
-          const endPx = Math.min(Math.ceil(playX), width);
-          for (let px = 0; px < endPx; px++) {
+          strokeColumns(ctx, 0, endPx, (px) => {
             const t0 = visStart + (px / width) * visDur;
             const t1 = visStart + ((px + 1) / width) * visDur;
             const idx0 = Math.floor((t0 / duration) * waveformData.length);
             const idx1 = Math.ceil((t1 / duration) * waveformData.length);
-            if (idx0 >= waveformData.length || idx1 < 0) continue;
-
+            if (idx0 >= waveformData.length || idx1 < 0) return null;
             let maxVal = 0;
             for (let i = Math.max(0, idx0); i < Math.min(waveformData.length, idx1); i++) {
               if (waveformData[i] > maxVal) maxVal = waveformData[i];
             }
             const halfH = maxVal * centerY;
-            ctx.moveTo(px + 0.5, centerY - halfH);
-            ctx.lineTo(px + 0.5, centerY + halfH);
-          }
-          ctx.stroke();
+            return [centerY - halfH, centerY + halfH];
+          }, playedColorAt);
         }
 
         ctx.restore();
@@ -421,7 +419,7 @@ export function WaveformVisualizer({
         ctx.fill();
       }
     }
-  }, [duration, colors, waveformData, waveformHiResRef, loopStart, loopEnd, getVisibleStart, getVisibleDuration, timeToX]);
+  }, [duration, colors, waveformData, waveformHiResRef, loopStart, loopEnd, getVisibleStart, getVisibleDuration, timeToX, columnColor]);
 
   // === Minimap drawing ===
   const drawMinimap = useCallback(() => {
@@ -563,16 +561,22 @@ export function WaveformVisualizer({
   useEffect(() => {
     if (!waveformHiResRef) return;
 
+    let gotHiRes = false, gotColors = false, ticks = 0;
     const checkInterval = setInterval(() => {
-      if (waveformHiResRef.current) {
+      ticks++;
+      const hiResNow = !!waveformHiResRef.current;
+      const colorsNow = !!waveformColorRef?.current;
+      if ((hiResNow && !gotHiRes) || (colorsNow && !gotColors)) {
+        gotHiRes = hiResNow; gotColors = colorsNow;
         drawWaveform();
         drawOverlay(playbackTimeRef?.current ?? playbackTime ?? 0);
-        clearInterval(checkInterval);
       }
+      // Stop once both arrived, or give up after 30s (colour data is optional)
+      if ((gotHiRes && (gotColors || !waveformColorRef)) || ticks > 300) clearInterval(checkInterval);
     }, 100);
 
     return () => clearInterval(checkInterval);
-  }, [waveformHiResRef, drawWaveform, drawOverlay, playbackTime, playbackTimeRef]);
+  }, [waveformHiResRef, waveformColorRef, drawWaveform, drawOverlay, playbackTime, playbackTimeRef]);
 
   // === Zoom helpers ===
   const handleZoomIn = useCallback(() => {

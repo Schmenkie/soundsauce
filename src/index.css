@@ -1,58 +1,103 @@
 @import "tailwindcss";
 
 @theme {
-  /* Ember (amber-based accent) color scale */
-  --color-ember-50: #FFFBEB;
-  --color-ember-100: #FEF3C7;
-  --color-ember-200: #FDE68A;
-  --color-ember-300: #FCD34D;
-  --color-ember-400: #FBBF24;
-  --color-ember-500: #F59E0B;
-  --color-ember-600: #D97706;
-  --color-ember-700: #B45309;
-  --color-ember-800: #92400E;
-  --color-ember-900: #78350F;
+  /* Signal Deck — colour is frequency. Five hues for five regions of the spectrum. */
+  --color-spec-sub: #8B5CF6;   /* violet  · sub / bass        */
+  --color-spec-low: #3B82F6;   /* blue    · low-mids          */
+  --color-spec-mid: #22C55E;   /* green   · mids              */
+  --color-spec-high: #FACC15;  /* yellow  · high-mids         */
+  --color-spec-air: #EF4444;   /* red     · highs / air       */
 
-  /* Typography */
-  --font-display: "Satoshi", "DM Sans", system-ui, -apple-system, sans-serif;
-  --font-sans: "General Sans", "DM Sans", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /* "ember" is kept as the single-accent scale (used by ~50 components) and now
+     points at Signal Deck's yellow — the high-mid stop of the spectrum. */
+  --color-ember-50: #FEFCE8;
+  --color-ember-100: #FEF9C3;
+  --color-ember-200: #FEF08A;
+  --color-ember-300: #FDE047;
+  --color-ember-400: #FACC15;
+  --color-ember-500: #FACC15;
+  --color-ember-600: #CA8A04;
+  --color-ember-700: #A16207;
+  --color-ember-800: #854D0E;
+  --color-ember-900: #713F12;
+
+  /* Neutrals — the whole app was built on Tailwind's zinc (dark) and stone (light).
+     Re-point them at Signal Deck's blue-biased greys so every component re-skins at once. */
+  --color-zinc-950: #050607;
+  --color-zinc-900: #0D0F12;
+  --color-zinc-800: #14171C;
+  --color-zinc-700: #1C2027;
+  --color-zinc-600: #2A3039;
+  --color-zinc-500: #7C8794;
+  --color-zinc-400: #9AA4B0;
+  --color-zinc-300: #B8C0CA;
+  --color-zinc-200: #CDD3DB;
+  --color-zinc-100: #E1E5EA;
+  --color-zinc-50: #E8ECF1;
+
+  --color-stone-50: #F5F6F8;
+  --color-stone-100: #EDEFF3;
+  --color-stone-200: #D9DDE3;
+  --color-stone-300: #B8BEC7;
+  --color-stone-400: #6B7280;
+  --color-stone-500: #4B5563;
+  --color-stone-600: #374151;
+  --color-stone-700: #1F2933;
+  --color-stone-800: #1A1F26;
+  --color-stone-900: #0F1216;
+
+  /* amber-* was used interchangeably with ember-* — alias it to the same yellow scale */
+  --color-amber-50: #FEFCE8;
+  --color-amber-100: #FEF9C3;
+  --color-amber-200: #FEF08A;
+  --color-amber-300: #FDE047;
+  --color-amber-400: #FACC15;
+  --color-amber-500: #FACC15;
+  --color-amber-600: #CA8A04;
+  --color-amber-700: #A16207;
+  --color-amber-800: #854D0E;
+  --color-amber-900: #713F12;
+  --color-amber-950: #1A1400;
+
+  /* Typography — Syne (display), Albert Sans (body), DM Mono (data) */
+  --font-display: "Syne", "Albert Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "Albert Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "DM Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 :root {
-  --bg-primary: #09090B;
-  --bg-card: #18181B;
-  --bg-elevated: #27272A;
-  --border: #3F3F46;
-  --border-subtle: #27272A;
-  --text-primary: #FAFAFA;
-  --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
-  --accent: #F59E0B;
-  --accent-hover: #D97706;
-  --accent-subtle: rgba(245, 158, 11, 0.15);
-  --accent-pink: #F59E0B;
-  --accent-orange: #F59E0B;
-  --success: #22C55E;
+  --bg-primary: #050607;
+  --bg-card: #0D0F12;
+  --bg-elevated: #14171C;
+  --border: #1C2027;
+  --border-subtle: #14171C;
+  --text-primary: #E8ECF1;
+  --text-secondary: #9AA4B0;
+  --text-muted: #7C8794;
+  --accent: #FACC15;
+  --accent-hover: #FDE047;
+  --accent-subtle: rgba(250, 204, 21, 0.14);
+  --success: #34D399;
   --error: #EF4444;
-  font-family: 'General Sans', 'DM Sans', system-ui, -apple-system, sans-serif;
+  /* Spectrum gradient stops (left→right = low→high frequency) */
+  --spectrum: linear-gradient(90deg, #8B5CF6 0%, #3B82F6 25%, #22C55E 50%, #FACC15 75%, #EF4444 100%);
+  --spectrum-v: linear-gradient(0deg, #8B5CF6 0%, #3B82F6 25%, #22C55E 50%, #FACC15 75%, #EF4444 100%);
+  font-family: 'Albert Sans', system-ui, -apple-system, sans-serif;
 }
 
 [data-theme="light"] {
-  --bg-primary: #FAFAF9;
+  --bg-primary: #F5F6F8;
   --bg-card: #FFFFFF;
-  --bg-elevated: #F5F5F4;
-  --border: #E7E5E4;
-  --border-subtle: #F5F5F4;
-  --text-primary: #1C1917;
-  --text-secondary: #57534E;
-  --text-muted: #A8A29E;
-  --accent: #D97706;
-  --accent-hover: #B45309;
-  --accent-subtle: rgba(217, 119, 6, 0.1);
-  --accent-pink: #D97706;
-  --accent-orange: #D97706;
-  --success: #16A34A;
+  --bg-elevated: #EDEFF3;
+  --border: #D9DDE3;
+  --border-subtle: #EDEFF3;
+  --text-primary: #0F1216;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --accent: #CA8A04;
+  --accent-hover: #A16207;
+  --accent-subtle: rgba(202, 138, 4, 0.12);
+  --success: #059669;
   --error: #DC2626;
 }
 
@@ -451,3 +496,34 @@ input[type="range"]::-moz-range-thumb {
   height: 6px;
   border-radius: 3px;
 }
+
+
+/* ========== Signal Deck utilities ========== */
+/* Hairline grid ground — the "deck" the instruments sit on */
+/* The app passes `theme` as a prop rather than stamping data-theme, so grids carry
+   explicit per-theme colours instead of reading the CSS variables. */
+.bg-grid-dark {
+  background-image:
+    linear-gradient(rgba(232, 236, 241, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 236, 241, 0.045) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.bg-grid-light {
+  background-image:
+    linear-gradient(rgba(15, 18, 22, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 18, 22, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+/* Spectrum fills — horizontal (time / frequency axis) and vertical (level) */
+.bg-spectrum { background-image: var(--spectrum); }
+.bg-spectrum-v { background-image: var(--spectrum-v); }
+.text-spectrum {
+  background-image: var(--spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* Thin spectrum rule, e.g. under headers */
+.rule-spectrum { height: 2px; background-image: var(--spectrum); border-radius: 1px; }
+/* Signal glow ring for active controls */
+.ring-signal { box-shadow: inset 0 0 0 1px var(--accent), 0 0 18px var(--accent-subtle); }

@@ -58,7 +58,7 @@ export function Step({
       >
         {/* Step number circle */}
         <div
-          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${numberCircleBg}`}
+          className={`w-7 h-7 rounded-md flex items-center justify-center font-mono text-xs shrink-0 ${numberCircleBg}`}
         >
           {isCompleted ? <Check className="w-3.5 h-3.5" /> : number}
         </div>
@@ -77,7 +77,7 @@ export function Step({
         )}
 
         {/* Title */}
-        <span className={`font-display font-medium text-sm ${textColor} flex-1 text-left`}>
+        <span className={`font-display font-bold uppercase tracking-wide text-[13px] ${textColor} flex-1 text-left`}>
           {title}
         </span>
 

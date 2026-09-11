@@ -171,6 +171,16 @@ export function useAudioWorker() {
   }, [postMessage]);
 
   /**
+   * Spectral-centroid colour map for the waveform (Signal Deck). One t ∈ [0,1] per column,
+   * -1 for silence.
+   * @returns {Promise<{ colors: Float32Array, numColumns: number }>}
+   */
+  const generateWaveformColors = useCallback(async (channelData, sampleRate, numColumns = 512) => {
+    const result = await postMessage('GENERATE_WAVEFORM_COLORS', { channelData: channelData.buffer.slice(0), sampleRate, numColumns });
+    return { colors: new Float32Array(result.colors), numColumns: result.numColumns };
+  }, [postMessage]);
+
+  /**
    * Quick tempo + key detection (no full feature extraction). Used to stamp
    * stem filenames with BPM/key as soon as a track is decoded.
    * @param {Float32Array} channelData - Mono audio samples
@@ -191,6 +201,7 @@ export function useAudioWorker() {
     analyzeAudio,
     detectInstruments,
     detectTempoAndKey,
+    generateWaveformColors,
     calculateSpectralMatch,
     detectHarmonics,
     generateWaveformData,

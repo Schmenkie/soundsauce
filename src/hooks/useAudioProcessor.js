@@ -45,6 +45,8 @@ export function useAudioProcessor() {
   const audioBufferSourceRef = useRef(null); // Track which raw audio data was decoded into audioBufferRef
   const playbackTimeRef = useRef(0);
   const waveformHiResRef = useRef(null);
+  // Spectral colour map for the waveform (Signal Deck) — { colors: Float32Array, numColumns }
+  const waveformColorRef = useRef(null);
 
   // Loop refs (for use in callbacks)
   const loopEnabledRef = useRef(false);
@@ -594,6 +596,7 @@ export function useAudioProcessor() {
       // Generate hi-res waveform data asynchronously via Web Worker
       // This enables deep zoom (64x) with min/max pairs per ~64 samples
       waveformHiResRef.current = null; // Clear stale data
+      waveformColorRef.current = null;
       const channelData = buffer.getChannelData(0);
       worker.generateWaveformData(channelData, buffer.sampleRate)
         .then(hiResData => {
@@ -601,6 +604,14 @@ export function useAudioProcessor() {
         })
         .catch(err => {
           console.warn('Hi-res waveform generation failed:', err);
+        });
+      // Colour the waveform by spectral centroid (Signal Deck)
+      worker.generateWaveformColors(channelData, buffer.sampleRate, 640)
+        .then(colorData => {
+          waveformColorRef.current = colorData;
+        })
+        .catch(err => {
+          console.warn('Waveform colour generation failed:', err);
         });
 
       return { error: null };
@@ -761,6 +772,7 @@ export function useAudioProcessor() {
     brightnessRef,
     playbackTimeRef,
     waveformHiResRef,
+    waveformColorRef,
 
     // Setters
     setVolume,
@@ -786,6 +798,7 @@ export function useAudioProcessor() {
     formatTime,
     generateWaveform,
     generateWaveformData: worker.generateWaveformData,
+    generateWaveformColors: worker.generateWaveformColors,
     extractWavetable: worker.extractWavetable,
     detectTempoAndKey: worker.detectTempoAndKey
   };

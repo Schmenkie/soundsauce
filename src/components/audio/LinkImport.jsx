@@ -92,9 +92,9 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
   // ---- Offline: compact hint + setup instructions ---------------------------
   if (!online) {
     return (
-      <div className={`p-4 mb-4 rounded-lg border border-dashed ${isDark ? 'border-zinc-700 bg-zinc-900/40' : 'border-stone-300 bg-stone-50'}`}>
+      <div className={`p-4 mb-4 rounded-lg border border-dashed ${isDark ? 'border-[#2A3039] bg-[#0D0F12]/60' : 'border-[#B8BEC7] bg-[#F5F6F8]'}`}>
         <div className="flex flex-wrap items-center gap-3">
-          <div className={`w-9 h-9 rounded-md flex items-center justify-center ${isDark ? 'bg-zinc-800' : 'bg-stone-200'}`}>
+          <div className={`w-9 h-9 rounded-md flex items-center justify-center border ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-[#EDEFF3] border-[#D9DDE3]'}`}>
             <Link2 className={`w-4 h-4 ${t.textMuted}`} />
           </div>
           <div className="flex-1 min-w-[200px]">
@@ -118,7 +118,7 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
         {showSetup && (
           <div className={`mt-3 text-xs space-y-2 ${t.textMuted}`}>
             <p>The helper runs yt-dlp on your Mac (YouTube blocks cloud servers, so it can't live on Vercel). One-time setup:</p>
-            <pre className={`p-3 rounded-md font-mono text-[11px] leading-relaxed overflow-x-auto ${isDark ? 'bg-zinc-950 text-zinc-300' : 'bg-white text-stone-700 border border-stone-200'}`}>
+            <pre className={`p-3 rounded-md font-mono text-[11px] leading-relaxed overflow-x-auto border ${isDark ? 'bg-[#0A0C0F] text-[#9AA4B0] border-[#1C2027]' : 'bg-white text-[#4B5563] border-[#D9DDE3]'}`}>
 {`brew install yt-dlp ffmpeg
 cd ~/audio-analyzer-pro
 npm run helper            # keep this running while you work
@@ -134,13 +134,13 @@ npm run helper:install`}
 
   // ---- Online ----------------------------------------------------------------
   return (
-    <div className={`p-4 mb-4 rounded-lg border ${isDark ? 'border-zinc-700 bg-zinc-900' : 'border-stone-200 bg-white'}`}>
+    <div className={`p-3 mb-4 rounded-lg border ${isDark ? 'border-[#1C2027] bg-[#0D0F12]' : 'border-[#D9DDE3] bg-white'}`}>
       <form
         onSubmit={(e) => { e.preventDefault(); handleResolve(); }}
         className="flex items-center gap-2"
       >
-        <div className={`flex-1 flex items-center gap-2 px-3 rounded-md border ${isDark ? 'bg-zinc-950 border-zinc-700 focus-within:border-ember-500/60' : 'bg-stone-50 border-stone-200 focus-within:border-ember-600/50'}`}>
-          <Link2 className={`w-4 h-4 flex-shrink-0 ${t.textDimmed}`} />
+        <div className={`flex-1 flex items-center gap-2 px-3 rounded-md border ${isDark ? 'bg-[#0A0C0F] border-[#1C2027] focus-within:border-ember-500/70' : 'bg-[#F5F6F8] border-[#D9DDE3] focus-within:border-ember-600/60'}`}>
+          <span className={`font-mono text-sm select-none ${isDark ? 'text-ember-500' : 'text-ember-600'}`} aria-hidden="true">&gt;</span>
           <input
             ref={inputRef}
             type="text"
@@ -154,10 +154,10 @@ npm run helper:install`}
                 handleResolve(url);
               }
             }}
-            placeholder="Paste a YouTube / SoundCloud link, or type a track name"
+            placeholder="paste a youtube / soundcloud link — or type a track name"
             disabled={disabled || !!grabbingUrl}
             aria-label="Track link or search"
-            className={`flex-1 py-2.5 bg-transparent text-sm outline-none ${t.text} ${isDark ? 'placeholder:text-zinc-500' : 'placeholder:text-stone-400'}`}
+            className={`flex-1 py-2.5 bg-transparent font-mono text-[13px] outline-none ${t.text} ${isDark ? 'placeholder:text-[#4B5563]' : 'placeholder:text-[#9AA4B0]'}`}
           />
           {query && !grabbingUrl && (
             <button type="button" onClick={() => { setQuery(''); setResults([]); setError(null); }} aria-label="Clear" className={t.textDimmed}>
@@ -168,8 +168,8 @@ npm run helper:install`}
         <button
           type="submit"
           disabled={disabled || !query.trim() || resolving || !!grabbingUrl}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium disabled:opacity-50 ${
-            isDark ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600' : 'bg-ember-600 text-white hover:bg-ember-700'
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-semibold disabled:opacity-50 ${
+            isDark ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'
           }`}
         >
           {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : extractMediaUrl(query) ? <Download className="w-4 h-4" /> : <Search className="w-4 h-4" />}
@@ -182,7 +182,7 @@ npm run helper:install`}
         <button
           type="button"
           onClick={useClipboard}
-          className={`mt-2 w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs text-left ${isDark ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-amber-50 hover:bg-amber-100 text-stone-700'}`}
+          className={`mt-2 w-full flex items-center gap-2 px-3 py-2 rounded-md font-mono text-[11px] text-left border ${isDark ? 'bg-[#14171C] border-[#1C2027] hover:border-[#2A3039] text-[#9AA4B0]' : 'bg-[#F5F6F8] border-[#D9DDE3] hover:border-[#B8BEC7] text-[#4B5563]'}`}
         >
           <Clipboard className={`w-3.5 h-3.5 flex-shrink-0 ${isDark ? 'text-ember-500' : 'text-ember-600'}`} />
           <span className="truncate">Grab the link on your clipboard: <span className="font-mono">{clipboardUrl}</span></span>
@@ -196,8 +196,8 @@ npm run helper:install`}
             <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> {phaseLabel[job.phase] || 'Working…'}</span>
             <span className="font-mono tabular-nums">{job.progress}%</span>
           </div>
-          <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-zinc-800' : 'bg-stone-200'}`}>
-            <div className={`h-full transition-all duration-300 ${isDark ? 'bg-ember-500' : 'bg-ember-600'}`} style={{ width: `${job.progress}%` }} />
+          <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-[#14171C]' : 'bg-[#EDEFF3]'}`}>
+            <div className="h-full transition-all duration-300 bg-spectrum" style={{ width: `${job.progress}%` }} />
           </div>
         </div>
       )}
@@ -213,9 +213,9 @@ npm run helper:install`}
                 type="button"
                 onClick={() => handleGrab(r)}
                 disabled={r.isPlaylist}
-                className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors disabled:opacity-60 ${isDark ? 'hover:bg-zinc-800' : 'hover:bg-stone-100'}`}
+                className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors disabled:opacity-60 ${isDark ? 'hover:bg-[#14171C]' : 'hover:bg-[#F5F6F8]'}`}
               >
-                <div className={`w-12 h-12 rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center ${isDark ? 'bg-zinc-800' : 'bg-stone-200'}`}>
+                <div className={`w-12 h-12 rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center border ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-[#EDEFF3] border-[#D9DDE3]'}`}>
                   {r.thumbnail ? (
                     <img src={r.thumbnail} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : r.isPlaylist ? (
@@ -226,7 +226,7 @@ npm run helper:install`}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className={`text-sm font-medium truncate ${t.text}`}>{r.title}</div>
-                  <div className={`text-xs truncate ${t.textMuted}`}>
+                  <div className={`font-mono text-[11px] truncate ${t.textMuted}`}>
                     {r.artist || r.uploader}{r.isPlaylist && r.entryCount ? ` · ${r.entryCount} tracks` : ''}
                   </div>
                 </div>

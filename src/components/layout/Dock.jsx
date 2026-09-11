@@ -41,8 +41,8 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseY, onClick }) {
   // Amber glow style — radial gradient follows cursor within the icon
   const glowStyle = isHovered ? {
     background: isDark
-      ? `radial-gradient(80px circle at ${glowPos.x}px ${glowPos.y}px, rgba(245,158,11,0.25), transparent 70%)`
-      : `radial-gradient(80px circle at ${glowPos.x}px ${glowPos.y}px, rgba(217,119,6,0.18), transparent 70%)`,
+      ? `radial-gradient(80px circle at ${glowPos.x}px ${glowPos.y}px, rgba(250,204,21,0.22), transparent 70%)`
+      : `radial-gradient(80px circle at ${glowPos.x}px ${glowPos.y}px, rgba(202,138,4,0.16), transparent 70%)`,
   } : {};
 
   const iconContent = (
@@ -52,10 +52,10 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseY, onClick }) {
       onMouseMove={handleMouseMove}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`relative flex items-center justify-center rounded-xl transition-colors duration-200 overflow-hidden ${
+      className={`relative flex items-center justify-center rounded-md border transition-colors duration-200 overflow-hidden ${
         isActive
-          ? isDark ? 'bg-zinc-700/80' : 'bg-amber-100/90'
-          : isDark ? 'bg-zinc-800/50 hover:bg-zinc-700/50' : 'bg-stone-200/60 hover:bg-stone-200/90'
+          ? isDark ? 'bg-[#14171C] border-ember-500 ring-signal' : 'bg-white border-ember-600 ring-signal'
+          : isDark ? 'bg-[#14171C] border-[#1C2027] hover:border-[#2A3039]' : 'bg-white border-[#D9DDE3] hover:border-[#B8BEC7]'
       }`}
     >
       {/* Amber glow overlay */}
@@ -73,18 +73,18 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseY, onClick }) {
           className="absolute inset-0 rounded-xl pointer-events-none"
           style={{
             background: isDark
-              ? 'radial-gradient(circle at 50% 50%, rgba(245,158,11,0.15), transparent 70%)'
-              : 'radial-gradient(circle at 50% 50%, rgba(217,119,6,0.12), transparent 70%)',
+              ? 'radial-gradient(circle at 50% 50%, rgba(250,204,21,0.14), transparent 70%)'
+              : 'radial-gradient(circle at 50% 50%, rgba(202,138,4,0.10), transparent 70%)',
           }}
         />
       )}
 
       <Icon className={`relative z-10 w-[18px] h-[18px] transition-colors ${
         isActive
-          ? isDark ? 'text-ember-500' : 'text-amber-700'
+          ? isDark ? 'text-ember-500' : 'text-ember-600'
           : isHovered
-            ? isDark ? 'text-ember-500' : 'text-amber-600'
-            : isDark ? 'text-zinc-400' : 'text-stone-500'
+            ? isDark ? 'text-[#E8ECF1]' : 'text-[#0F1216]'
+            : isDark ? 'text-[#7C8794]' : 'text-[#6B7280]'
       }`} />
       {badge > 0 && (
         <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 text-[10px] font-bold flex items-center justify-center bg-ember-500 text-zinc-950 rounded-full px-1 leading-none z-20">
@@ -107,8 +107,8 @@ function DockIcon({ to, icon: Icon, label, badge, theme, mouseY, onClick }) {
       )}
 
       {/* Tooltip — appears to the right, hidden on mobile/touch */}
-      <div className={`absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-[60] hidden md:block ${
-        isDark ? 'bg-zinc-800 text-zinc-100 border border-zinc-700' : 'bg-stone-800 text-white'
+      <div className={`absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-[11px] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none shadow-lg z-[60] hidden md:block ${
+        isDark ? 'bg-[#14171C] text-[#E8ECF1] border border-[#2A3039]' : 'bg-[#0F1216] text-white'
       }`}>
         {label}
       </div>
@@ -153,17 +153,17 @@ export function Dock({ theme, onToggleTheme, hidden }) {
         <motion.div
           onMouseMove={(e) => mouseY.set(e.clientY)}
           onMouseLeave={() => mouseY.set(Infinity)}
-          className={`flex flex-col items-center gap-1 px-1.5 py-2 rounded-2xl border backdrop-blur-xl shadow-2xl ${
+          className={`flex flex-col items-center gap-1.5 p-1.5 rounded-lg border backdrop-blur-xl shadow-2xl ${
             isDark
-              ? 'bg-zinc-900/70 border-zinc-700/50 shadow-black/40'
-              : 'bg-white/70 border-stone-200/60 shadow-stone-300/30'
+              ? 'bg-[#0D0F12]/85 border-[#1C2027] shadow-black/50'
+              : 'bg-white/85 border-[#D9DDE3] shadow-[#B8BEC7]/30'
           }`}
         >
           {navItems.map((item) => (
             <DockIcon key={item.to} {...item} theme={theme} mouseY={mouseY} />
           ))}
 
-          <div className={`h-px w-full my-1 ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+          <div className="h-px w-full my-0.5 rule-spectrum opacity-70" />
 
           {onToggleTheme && (
             <DockIcon
@@ -192,42 +192,42 @@ export function Dock({ theme, onToggleTheme, hidden }) {
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
       >
         <div
-          className={`flex items-center gap-1 px-2 py-2 rounded-2xl border backdrop-blur-xl shadow-2xl ${
+          className={`flex items-center gap-1.5 p-1.5 rounded-lg border backdrop-blur-xl shadow-2xl ${
             isDark
-              ? 'bg-zinc-900/70 border-zinc-700/50 shadow-black/40'
-              : 'bg-white/70 border-stone-200/60 shadow-stone-300/30'
+              ? 'bg-[#0D0F12]/85 border-[#1C2027] shadow-black/50'
+              : 'bg-white/85 border-[#D9DDE3] shadow-[#B8BEC7]/30'
           }`}
         >
           {navItems.map((item) => (
             <Link key={item.to} to={item.to} aria-label={item.label}>
-              <div className={`w-11 h-11 flex items-center justify-center rounded-xl transition-colors ${
+              <div className={`w-11 h-11 flex items-center justify-center rounded-md border transition-colors ${
                 isActive(item.to)
-                  ? isDark ? 'bg-zinc-700/80' : 'bg-amber-100/90'
-                  : isDark ? 'bg-zinc-800/50' : 'bg-stone-200/60'
+                  ? isDark ? 'bg-[#14171C] border-ember-500 ring-signal' : 'bg-white border-ember-600 ring-signal'
+                  : isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-white border-[#D9DDE3]'
               }`}>
                 <item.icon className={`w-5 h-5 ${
                   isActive(item.to)
-                    ? isDark ? 'text-ember-500' : 'text-amber-700'
-                    : isDark ? 'text-zinc-400' : 'text-stone-500'
+                    ? isDark ? 'text-ember-500' : 'text-ember-600'
+                    : isDark ? 'text-[#7C8794]' : 'text-[#6B7280]'
                 }`} />
               </div>
             </Link>
           ))}
 
-          <div className={`w-px h-8 my-auto ${isDark ? 'bg-zinc-700/50' : 'bg-stone-300/50'}`} />
+          <div className="w-px h-8 my-auto bg-spectrum-v opacity-70" />
 
           {onToggleTheme && (
             <button type="button" onClick={onToggleTheme} aria-label={isDark ? 'Light mode' : 'Dark mode'}>
-              <div className={`w-11 h-11 flex items-center justify-center rounded-xl ${isDark ? 'bg-zinc-800/50' : 'bg-stone-200/60'}`}>
-                {isDark ? <Sun className="w-5 h-5 text-zinc-400" /> : <Moon className="w-5 h-5 text-stone-500" />}
+              <div className={`w-11 h-11 flex items-center justify-center rounded-md border ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-white border-[#D9DDE3]'}`}>
+                {isDark ? <Sun className="w-5 h-5 text-[#7C8794]" /> : <Moon className="w-5 h-5 text-[#6B7280]" />}
               </div>
             </button>
           )}
 
           {!loading && (
             <button type="button" onClick={lockItem.onClick} aria-label={lockItem.label}>
-              <div className={`w-11 h-11 flex items-center justify-center rounded-xl ${isDark ? 'bg-zinc-800/50' : 'bg-stone-200/60'}`}>
-                <lockItem.icon className={`w-5 h-5 ${isSignedIn ? (isDark ? 'text-ember-500' : 'text-amber-700') : (isDark ? 'text-zinc-400' : 'text-stone-500')}`} />
+              <div className={`w-11 h-11 flex items-center justify-center rounded-md border ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-white border-[#D9DDE3]'}`}>
+                <lockItem.icon className={`w-5 h-5 ${isSignedIn ? (isDark ? 'text-ember-500' : 'text-ember-600') : (isDark ? 'text-[#7C8794]' : 'text-[#6B7280]')}`} />
               </div>
             </button>
           )}

@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { trackStemSelected } from '../../lib/posthog';
 import { SEPARATION_MODES, getStemLabel } from '../../utils/stemFiles';
+import { stemColor } from '../../utils/spectrum';
+import { MiniSpectrum } from '../ui/MiniSpectrum';
 
 /**
  * Icons per stem key. Labels come from getStemLabel() so `other` reads as
@@ -36,18 +38,18 @@ function SeparationProgress({ progress, status, mode, quality, theme }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-sm">
-        <span className={theme === 'dark' ? 'text-zinc-400' : 'text-stone-500'}>
+        <span className={`font-mono ${theme === 'dark' ? 'text-[#9AA4B0]' : 'text-[#4B5563]'}`}>
           {statusMessages[status] || 'Processing...'}
         </span>
-        <span className={`font-mono tabular-nums ${theme === 'dark' ? 'text-zinc-500' : 'text-zinc-400'}`}>{progress}%</span>
+        <span className={`font-mono tabular-nums ${theme === 'dark' ? 'text-[#7C8794]' : 'text-[#6B7280]'}`}>{progress}%</span>
       </div>
-      <div className={`h-1 overflow-hidden rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'}`}>
+      <div className={`h-1 overflow-hidden rounded-full ${theme === 'dark' ? 'bg-[#14171C]' : 'bg-[#EDEFF3]'}`}>
         <div
-          className={`h-full transition-all duration-300 ${theme === 'dark' ? 'bg-ember-500' : 'bg-ember-600'}`}
+          className="h-full transition-all duration-300 bg-spectrum"
           style={{ width: `${progress}%` }}
         />
       </div>
-      <p className={`text-xs text-center ${theme === 'dark' ? 'text-zinc-500' : 'text-zinc-400'}`}>
+      <p className={`font-mono text-[11px] text-center ${theme === 'dark' ? 'text-[#7C8794]' : 'text-[#6B7280]'}`}>
         {eta}
       </p>
     </div>
@@ -58,18 +60,18 @@ function SeparationProgress({ progress, status, mode, quality, theme }) {
  * Small cloud badge showing whether a stem has been re-hosted on our storage
  */
 function KeepBadge({ state, onKeep, label, theme, inverted }) {
-  const muted = inverted ? 'opacity-70' : (theme === 'dark' ? 'text-zinc-500' : 'text-stone-400');
+  const muted = inverted ? 'opacity-70' : (theme === 'dark' ? 'text-[#7C8794]' : 'text-[#6B7280]');
   if (state === 'saved') {
     return (
-      <span className={`inline-flex items-center gap-1 text-xs ${inverted ? 'opacity-80' : (theme === 'dark' ? 'text-ember-400' : 'text-ember-600')}`} title="Saved permanently">
-        <Cloud className="w-3 h-3" /> Kept
+      <span className={`inline-flex items-center gap-1 font-mono text-[11px] ${inverted ? 'opacity-80' : (theme === 'dark' ? 'text-[#34D399]' : 'text-[#059669]')}`} title="Saved permanently">
+        <Cloud className="w-3 h-3" /> KEPT
       </span>
     );
   }
   if (state === 'saving') {
     return (
-      <span className={`inline-flex items-center gap-1 text-xs ${muted}`}>
-        <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+      <span className={`inline-flex items-center gap-1 font-mono text-[11px] ${muted}`}>
+        <Loader2 className="w-3 h-3 animate-spin" /> saving…
       </span>
     );
   }
@@ -77,11 +79,11 @@ function KeepBadge({ state, onKeep, label, theme, inverted }) {
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onKeep(); }}
-      className={`inline-flex items-center gap-1 text-xs hover:underline ${state === 'error' ? 'text-red-500' : muted}`}
+      className={`inline-flex items-center gap-1 font-mono text-[11px] hover:underline ${state === 'error' ? 'text-red-500' : muted}`}
       aria-label={`Keep ${label} stem permanently`}
       title={state === 'error' ? 'Save failed — click to retry' : 'Expires in ~7 days. Click to keep permanently.'}
     >
-      <CloudOff className="w-3 h-3" /> {state === 'error' ? 'Retry keep' : 'Keep'}
+      <CloudOff className="w-3 h-3" /> {state === 'error' ? 'retry keep' : 'keep'}
     </button>
   );
 }
@@ -104,11 +106,15 @@ function StemCard({
   onDownload,
   onAnalyze,
   onKeep,
+  spectrumDataRef,
+  sizeBytes,
   theme,
   t
 }) {
   const IconComponent = STEM_ICONS[stemType] || Layers;
   const label = getStemLabel(stemType, mode);
+  const color = stemColor(stemType);
+  const isDark = theme === 'dark';
 
   return (
     <div
@@ -128,53 +134,55 @@ function StemCard({
         }
       }}
       aria-label={`Select ${label} stem`}
-      className={`relative p-4 rounded-lg transition-colors cursor-pointer ${
+      className={`relative pl-5 pr-4 py-4 rounded-lg border transition-all cursor-pointer ${
         isSelected
-          ? theme === 'dark' ? 'bg-white text-black' : 'bg-black text-white'
+          ? isDark ? 'bg-[#14171C] border-[#2A3039]' : 'bg-white border-[#B8BEC7]'
           : isAvailable
-            ? theme === 'dark'
-              ? 'bg-zinc-800 hover:bg-zinc-700'
-              : 'bg-stone-100 hover:bg-stone-200'
-            : theme === 'dark'
-              ? 'bg-zinc-900 opacity-50 cursor-not-allowed'
-              : 'bg-stone-100 opacity-50 cursor-not-allowed'
+            ? isDark ? 'bg-[#0D0F12] border-[#1C2027] hover:border-[#2A3039]' : 'bg-white border-[#D9DDE3] hover:border-[#B8BEC7]'
+            : isDark ? 'bg-[#0D0F12] border-[#1C2027] opacity-50 cursor-not-allowed' : 'bg-white border-[#D9DDE3] opacity-50 cursor-not-allowed'
       }`}
+      style={isSelected ? { boxShadow: `inset 0 0 0 1px ${color.hex}55, 0 0 24px ${color.hex}22` } : undefined}
     >
+      {/* Channel colour stripe — this stem's home in the spectrum */}
+      <div
+        className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r"
+        style={{ background: color.gradient || color.hex }}
+        aria-hidden="true"
+      />
+
       {/* Analyzed checkmark indicator */}
       {isAnalyzed && (
         <div className="absolute top-2 right-2">
-          <div className={`w-5 h-5 flex items-center justify-center rounded-full ${
-            isSelected
-              ? theme === 'dark' ? 'bg-black' : 'bg-white'
-              : theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'
-          }`}>
-            <Check className={`w-3 h-3 ${
-              isSelected
-                ? theme === 'dark' ? 'text-white' : 'text-black'
-                : theme === 'dark' ? 'text-white' : 'text-black'
-            }`} />
+          <div className={`w-5 h-5 flex items-center justify-center rounded-full ${isDark ? 'bg-[#14171C]' : 'bg-[#EDEFF3]'}`}>
+            <Check className="w-3 h-3" style={{ color: color.hex }} />
           </div>
         </div>
       )}
 
-      {/* Stem icon and label */}
-      <div className="flex items-center gap-3 mb-3">
-        <IconComponent className="w-6 h-6" />
-        <div className="min-w-0">
-          <div className="font-medium">
-            {label}
+      <div className="flex items-start gap-3 mb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <IconComponent className="w-4 h-4" style={{ color: color.hex }} />
+            <div className={`font-display font-bold uppercase tracking-wide text-[13px] ${t.text}`}>
+              {label}
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {isAnalyzed ? (
-              <span className={`text-xs ${isSelected ? 'opacity-70' : t.textMuted}`}>Analyzed</span>
-            ) : isDownloaded && !isSelected ? (
-              <span className={`text-xs ${t.textMuted}`}>Ready</span>
-            ) : null}
-            {isAvailable && (
-              <KeepBadge state={keepState} onKeep={() => onKeep(stemType)} label={label} theme={theme} inverted={isSelected} />
-            )}
+          {/* Readout */}
+          <div className={`mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px] ${t.textDimmed}`}>
+            <span>format</span><span className={t.textMuted}>flac{sizeBytes ? ` · ${(sizeBytes / 1048576).toFixed(1)} MB` : ''}</span>
+            <span>state</span>
+            <span className={t.textMuted}>
+              {isAnalyzed ? 'analyzed' : isPlaying ? 'playing' : isDownloaded ? 'ready' : 'remote'}
+              {isAvailable && (
+                <span className="ml-2 inline-flex">
+                  <KeepBadge state={keepState} onKeep={() => onKeep(stemType)} label={label} theme={theme} inverted={false} />
+                </span>
+              )}
+            </span>
           </div>
         </div>
+        {/* Live five-band meter — moves while this stem plays */}
+        <MiniSpectrum spectrumDataRef={spectrumDataRef} active={!!isPlaying} height={52} className="w-14 flex-shrink-0" />
       </div>
 
       {/* Action buttons */}
@@ -188,12 +196,8 @@ function StemCard({
                 onAnalyze(stemType);
               }}
               disabled={isAnalyzing}
-              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                isSelected
-                  ? theme === 'dark' ? 'bg-black/30 hover:bg-black/40 text-black' : 'bg-white/30 hover:bg-white/40 text-white'
-                  : theme === 'dark'
-                    ? 'bg-white text-black hover:bg-stone-200'
-                    : 'bg-gradient-to-r from-ember-500 to-amber-600 text-white hover:opacity-90 shadow-sm shadow-ember-500/20'
+              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-mono rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                isDark ? 'bg-[#14171C] border-[#1C2027] text-[#E8ECF1] hover:border-[#2A3039]' : 'bg-[#F5F6F8] border-[#D9DDE3] text-[#0F1216] hover:border-[#B8BEC7]'
               }`}
               aria-label={`Analyze ${label} stem`}
             >
@@ -202,7 +206,7 @@ function StemCard({
               ) : (
                 <Sparkles className="w-4 h-4" />
               )}
-              <span>{isAnalyzing ? 'Analyzing...' : 'Analyze'}</span>
+              <span>{isAnalyzing ? 'analyzing…' : 'analyze'}</span>
             </button>
           )}
 
@@ -213,11 +217,8 @@ function StemCard({
                 e.stopPropagation();
                 onPlay(stemType);
               }}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                isSelected
-                  ? theme === 'dark' ? 'bg-black/20 hover:bg-black/30 text-black' : 'bg-white/20 hover:bg-white/30 text-white'
-                  : t.button
-              }`}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-mono rounded-md transition-colors ${t.button}`}
+              style={isPlaying ? { borderColor: color.hex, color: color.hex } : undefined}
               aria-label={`Play ${label} stem`}
             >
               {isPlaying ? (
@@ -225,7 +226,7 @@ function StemCard({
               ) : (
                 <Play className="w-4 h-4" />
               )}
-              <span className="hidden sm:inline">{isPlaying ? 'Pause' : 'Play'}</span>
+              <span className="hidden sm:inline">{isPlaying ? 'pause' : 'play'}</span>
             </button>
 
             <button
@@ -233,11 +234,7 @@ function StemCard({
                 e.stopPropagation();
                 onDownload(stemType);
               }}
-              className={`px-3 py-2 rounded-md transition-colors ${
-                isSelected
-                  ? theme === 'dark' ? 'bg-black/20 hover:bg-black/30 text-black' : 'bg-white/20 hover:bg-white/30 text-white'
-                  : t.button
-              }`}
+              className={`px-3 py-2 rounded-md transition-colors ${t.button}`}
               aria-label={`Download ${label} stem`}
               title="Download FLAC (stamped with BPM + key)"
             >
@@ -265,18 +262,23 @@ function ModePicker({ mode, onChange, theme }) {
             role="radio"
             aria-checked={active}
             onClick={() => onChange(m.id)}
-            className={`text-left p-3 rounded-lg border transition-colors ${
+            className={`text-left p-3 rounded-md border transition-colors ${
               active
                 ? theme === 'dark'
-                  ? 'border-ember-500 bg-ember-500/10 text-zinc-50'
-                  : 'border-ember-600 bg-amber-50 text-stone-900'
+                  ? 'border-ember-500 bg-[#14171C] text-[#E8ECF1] ring-signal'
+                  : 'border-ember-600 bg-white text-[#0F1216] ring-signal'
                 : theme === 'dark'
-                  ? 'border-zinc-700 hover:border-zinc-600 text-zinc-300'
-                  : 'border-stone-200 hover:border-stone-300 text-stone-700'
+                  ? 'border-[#1C2027] bg-[#0D0F12] hover:border-[#2A3039] text-[#9AA4B0]'
+                  : 'border-[#D9DDE3] bg-white hover:border-[#B8BEC7] text-[#4B5563]'
             }`}
           >
-            <div className="text-sm font-medium">{m.label}</div>
-            <div className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-zinc-500' : 'text-stone-500'}`}>{m.description}</div>
+            <div className="font-display font-bold uppercase tracking-wide text-[12px]">{m.label}</div>
+            <div className={`font-mono text-[11px] mt-1 ${theme === 'dark' ? 'text-[#7C8794]' : 'text-[#6B7280]'}`}>{m.description}</div>
+            <div className="mt-2 flex gap-1" aria-hidden="true">
+              {m.stems.map((st) => (
+                <span key={st} className="h-1 flex-1 rounded-full" style={{ background: stemColor(st).gradient || stemColor(st).hex, opacity: active ? 1 : 0.5 }} />
+              ))}
+            </div>
           </button>
         );
       })}
@@ -320,6 +322,9 @@ export function StemSelector({
   onCancel,
   onReset, // start a new separation with a different mode
 
+  // Live audio (for per-stem meters)
+  spectrumDataRef,
+
   // UI props
   hasAudio, // Whether source audio is loaded
   theme,
@@ -356,11 +361,11 @@ export function StemSelector({
       <div className={`p-4 ${t.card}`}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'}`}>
-              <Scissors className={`w-5 h-5 ${theme === 'dark' ? 'text-white' : 'text-black'}`} />
+            <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-[#14171C] border border-[#1C2027]' : 'bg-[#EDEFF3] border border-[#D9DDE3]'}`}>
+              <Scissors className="w-5 h-5 text-ember-500" />
             </div>
             <div>
-              <h4 className={`font-medium ${t.text}`}>Separate Stems</h4>
+              <h4 className={`font-display font-bold uppercase tracking-wide text-sm ${t.text}`}>Separate Stems</h4>
               <p className={`text-sm ${t.textMuted}`}>
                 Lossless FLAC, stamped with BPM and key — drops straight into Live
               </p>
@@ -374,7 +379,7 @@ export function StemSelector({
           {/* Quality toggle — 6-stem only has one model */}
           <div className="flex items-center gap-2 text-xs">
             <span className={t.textMuted}>Quality</span>
-            <div className={`inline-flex rounded-md overflow-hidden border ${theme === 'dark' ? 'border-zinc-700' : 'border-stone-200'}`} role="radiogroup" aria-label="Separation quality">
+            <div className={`inline-flex rounded-md overflow-hidden border ${theme === 'dark' ? 'border-[#1C2027]' : 'border-[#D9DDE3]'}`} role="radiogroup" aria-label="Separation quality">
               {[
                 { id: 'best', label: 'Best' },
                 { id: 'fast', label: 'Fast' },
@@ -391,8 +396,8 @@ export function StemSelector({
                     onClick={() => setQuality(q.id)}
                     className={`px-3 py-1.5 transition-colors disabled:opacity-50 ${
                       active
-                        ? theme === 'dark' ? 'bg-zinc-700 text-zinc-50' : 'bg-stone-900 text-white'
-                        : theme === 'dark' ? 'text-zinc-400 hover:bg-zinc-800' : 'text-stone-600 hover:bg-stone-100'
+                        ? theme === 'dark' ? 'bg-[#1A1E25] text-[#E8ECF1]' : 'bg-[#0F1216] text-white'
+                        : theme === 'dark' ? 'text-[#7C8794] hover:bg-[#14171C]' : 'text-[#6B7280] hover:bg-[#F5F6F8]'
                     }`}
                   >
                     {q.label}
@@ -410,7 +415,7 @@ export function StemSelector({
             disabled={!hasAudio}
             className={`px-4 py-2 font-medium text-sm rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
               theme === 'dark'
-                ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600'
+                ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400'
                 : 'bg-ember-600 text-white hover:bg-ember-700'
             }`}
           >
@@ -434,11 +439,11 @@ export function StemSelector({
       <div className={`p-4 ${t.card}`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-zinc-700' : 'bg-stone-200'}`}>
-              <Loader2 className={`w-5 h-5 animate-spin ${theme === 'dark' ? 'text-white' : 'text-black'}`} />
+            <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-[#14171C] border border-[#1C2027]' : 'bg-[#EDEFF3] border border-[#D9DDE3]'}`}>
+              <Loader2 className="w-5 h-5 animate-spin text-ember-500" />
             </div>
             <div>
-              <h4 className={`font-medium ${t.text}`}>{pickedMode === 'vocals' ? 'Grabbing Vocals' : 'Separating Stems'}</h4>
+              <h4 className={`font-display font-bold uppercase tracking-wide text-sm ${t.text}`}>{pickedMode === 'vocals' ? 'Grabbing Vocals' : 'Separating Stems'}</h4>
               <p className={`text-sm ${t.textMuted}`}>
                 Demucs · {SEPARATION_MODES.find(m => m.id === pickedMode)?.label}
               </p>
@@ -471,14 +476,14 @@ export function StemSelector({
       {/* Expired stems banner */}
       {isExpired && (
         <div className={`flex items-center gap-3 p-3 mb-4 rounded-lg ${
-          theme === 'dark' ? 'bg-amber-950 border border-amber-800' : 'bg-amber-50 border border-amber-300'
+          theme === 'dark' ? 'bg-[#1A1400] border border-ember-700/60' : 'bg-ember-50 border border-ember-300'
         }`}>
-          <Scissors className={`w-5 h-5 flex-shrink-0 ${theme === 'dark' ? 'text-amber-400' : 'text-amber-600'}`} />
+          <Scissors className={`w-5 h-5 flex-shrink-0 ${theme === 'dark' ? 'text-ember-400' : 'text-ember-600'}`} />
           <div className="flex-1">
-            <p className={`text-sm font-medium ${theme === 'dark' ? 'text-amber-300' : 'text-amber-700'}`}>
+            <p className={`text-sm font-medium ${theme === 'dark' ? 'text-ember-300' : 'text-ember-700'}`}>
               Stems have expired
             </p>
-            <p className={`text-xs ${theme === 'dark' ? 'text-amber-500' : 'text-amber-600'}`}>
+            <p className={`text-xs ${theme === 'dark' ? 'text-ember-500' : 'text-ember-600'}`}>
               Unkept stems live on Replicate's CDN for ~7 days. Separate again to re-process.
             </p>
           </div>
@@ -487,7 +492,7 @@ export function StemSelector({
             disabled={!hasAudio}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               theme === 'dark'
-                ? 'bg-zinc-700 text-white hover:bg-zinc-600'
+                ? 'bg-[#1A1E25] text-white hover:bg-[#242A33]'
                 : 'bg-ember-600 text-white hover:opacity-90'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
@@ -499,11 +504,11 @@ export function StemSelector({
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'}`}>
-            <Check className={`w-5 h-5 ${theme === 'dark' ? 'text-white' : 'text-black'}`} />
+          <div className={`w-10 h-10 flex items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-[#14171C] border border-[#1C2027]' : 'bg-[#EDEFF3] border border-[#D9DDE3]'}`}>
+            <Check className="w-5 h-5 text-[#34D399]" />
           </div>
           <div>
-            <h4 className={`font-medium ${t.text}`}>{isExpired ? 'Stems Expired' : `${modeInfo.label} Ready`}</h4>
+            <h4 className={`font-display font-bold uppercase tracking-wide text-sm ${t.text}`}>{isExpired ? 'Stems Expired' : `${modeInfo.label} Ready`}</h4>
             <p className={`text-sm ${t.textMuted}`}>
               {isExpired
                 ? 'Analysis results are still available'
@@ -535,7 +540,7 @@ export function StemSelector({
               disabled={isPacking}
               className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 rounded-md disabled:opacity-50 ${
                 theme === 'dark'
-                  ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600'
+                  ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400'
                   : 'bg-ember-600 text-white hover:bg-ember-700'
               }`}
               title="Zip of all stems + notes.txt with BPM, key and Camelot info"
@@ -550,7 +555,7 @@ export function StemSelector({
             onClick={() => onSelectStem('full')}
             className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 rounded-md ${
               selectedStem === 'full'
-                ? theme === 'dark' ? 'bg-white text-black' : 'bg-black text-white'
+                ? theme === 'dark' ? 'bg-[#14171C] text-[#E8ECF1] border border-ember-500 ring-signal' : 'bg-white text-[#0F1216] border border-ember-600 ring-signal'
                 : t.button
             }`}
           >
@@ -585,6 +590,8 @@ export function StemSelector({
             isAnalyzing={analyzingStem === stemType}
             isAnalyzed={analyzedStem === stemType}
             keepState={keepStates[stemType]}
+            spectrumDataRef={spectrumDataRef}
+            sizeBytes={stemAudioData[stemType]?.byteLength}
             onSelect={onSelectStem}
             onPlay={onPlayStem}
             onDownload={onDownloadStem}

@@ -1,7 +1,13 @@
+import { useMemo } from 'react';
 import { Volume2, Repeat } from 'lucide-react';
+import { spectrumColor, hzToSpectrumT } from '../../utils/spectrum';
+
+const NUM_BARS = 64;
+const NYQUIST = 22050;
 
 /**
- * Real-time frequency spectrum visualizer with clean grayscale/accent coloring.
+ * Real-time frequency spectrum — Signal Deck: every bar wears the colour of the
+ * frequency it represents (violet sub → blue low-mids → green mids → yellow high-mids → red air).
  */
 export function SpectrumAnalyzer({
   spectrumData,
@@ -10,30 +16,40 @@ export function SpectrumAnalyzer({
   theme,
   t
 }) {
+  const isDark = theme === 'dark';
+
+  // Bar i in useAudioProcessor maps to (i/64)^2.5 of Nyquist — colour by that frequency
+  const barColors = useMemo(() => Array.from({ length: NUM_BARS }, (_, i) => {
+    const hz = Math.pow(i / NUM_BARS, 2.5) * NYQUIST;
+    return spectrumColor(hzToSpectrumT(hz));
+  }), []);
+
   return (
-    <div className={`p-6 mb-6 ${t.card}`}>
-      <div className="mb-4 flex justify-between items-center">
-        <div className={`text-sm font-medium ${t.textMuted}`}>Frequency Spectrum</div>
-        <div className="flex items-center gap-2">
-          {loopEnabled && <span className={`text-xs flex items-center gap-1 ${t.textMuted}`}><Repeat className="w-3 h-3" /> Loop Active</span>}
-          <div className={`text-xs ${t.textDimmed}`}>{isPlaying ? 'Playing...' : 'Paused'}</div>
+    <div className={`p-5 mb-6 ${t.card}`}>
+      <div className="mb-3 flex justify-between items-center">
+        <div className={`font-display font-bold uppercase tracking-wide text-xs ${t.textMuted}`}>Spectrum</div>
+        <div className={`flex items-center gap-3 font-mono text-[11px] ${t.textDimmed}`}>
+          {loopEnabled && <span className="flex items-center gap-1"><Repeat className="w-3 h-3" /> loop</span>}
+          <span className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-ember-500 animate-pulse' : isDark ? 'bg-[#2A3039]' : 'bg-[#CDD2DA]'}`} />
+            {isPlaying ? 'live' : 'idle'}
+          </span>
         </div>
       </div>
       <div className="relative">
-        <div className="flex items-end justify-between gap-0.5 h-48">
+        <div className="flex items-end justify-between gap-0.5 h-40">
           {spectrumData.length > 0 ? (
             spectrumData.map((value, i) => {
-              const height = Math.max(value * 100, 3);
-              const intensity = Math.min(value * 1.5, 1);
-
+              const height = Math.max(value * 100, 2);
+              const intensity = Math.min(value * 1.6, 1);
               return (
                 <div
                   key={i}
-                  className="flex-1 transition-all duration-75"
+                  className="flex-1 rounded-t-[2px] transition-all duration-75"
                   style={{
                     height: height + '%',
-                    backgroundColor: theme === 'dark' ? '#F59E0B' : '#D97706',
-                    opacity: theme === 'dark' ? 0.15 + intensity * 0.85 : 0.1 + intensity * 0.9,
+                    backgroundColor: barColors[i] || barColors[NUM_BARS - 1],
+                    opacity: isDark ? 0.25 + intensity * 0.75 : 0.3 + intensity * 0.7,
                     minWidth: '3px',
                     maxWidth: '12px'
                   }}
@@ -42,19 +58,19 @@ export function SpectrumAnalyzer({
             })
           ) : (
             <div className={`flex flex-col items-center justify-center w-full h-full ${t.textDimmed} gap-3`}>
-              <Volume2 className="w-12 h-12 opacity-20" />
-              <div className="text-sm opacity-50">Press play to see frequencies</div>
+              <Volume2 className="w-10 h-10 opacity-20" />
+              <div className="font-mono text-xs opacity-60">press play to see the spectrum</div>
             </div>
           )}
         </div>
-        {spectrumData.length > 0 && (
-          <div className={`flex justify-between mt-3 text-xs ${t.textDimmed}`}>
-            <span>20 Hz</span>
-            <span>200 Hz</span>
-            <span>2 kHz</span>
-            <span>20 kHz</span>
-          </div>
-        )}
+        {/* Frequency ruler — the legend for the whole colour system */}
+        <div className="mt-2 rule-spectrum opacity-70" aria-hidden="true" />
+        <div className={`flex justify-between mt-1.5 font-mono text-[10px] tabular-nums ${t.textDimmed}`}>
+          <span>20 Hz</span>
+          <span>200 Hz</span>
+          <span>2 kHz</span>
+          <span>20 kHz</span>
+        </div>
       </div>
     </div>
   );

@@ -32,7 +32,7 @@ export function PlaybackControls({
       <div className="flex items-center gap-3 sm:gap-4">
         <button
           onClick={onTogglePlayback}
-          className={`w-12 h-12 sm:w-14 sm:h-14 min-w-[48px] min-h-[48px] flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${theme === 'dark' ? 'bg-white text-black hover:bg-stone-200' : 'bg-black text-white hover:bg-zinc-700'}`}
+          className={`w-12 h-12 sm:w-14 sm:h-14 min-w-[48px] min-h-[48px] flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${theme === 'dark' ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'}`}
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-0.5" fill="currentColor" />}
@@ -46,7 +46,7 @@ export function PlaybackControls({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={duration > 0 ? Math.round((playbackTime / duration) * 100) : 0}
-            className={`relative h-1 overflow-hidden cursor-pointer group rounded-full ${theme === 'dark' ? 'bg-zinc-700' : 'bg-stone-200'}`}
+            className={`relative h-1 overflow-hidden cursor-pointer group rounded-full ${theme === 'dark' ? 'bg-[#1C2027]' : 'bg-[#D9DDE3]'}`}
             onClick={onSeek}
             onKeyDown={(e) => {
               if (!duration) return;
@@ -74,7 +74,7 @@ export function PlaybackControls({
             {/* Loop region on progress bar */}
             {loopStart !== null && loopEnd !== null && duration > 0 && (
               <div
-                className={`absolute top-0 bottom-0 ${loopEnabled ? 'bg-white/30' : 'bg-zinc-500/30'}`}
+                className={`absolute top-0 bottom-0 ${loopEnabled ? 'bg-ember-500/30' : 'bg-[#7C8794]/30'}`}
                 style={{
                   left: `${(loopStart / duration) * 100}%`,
                   width: `${((loopEnd - loopStart) / duration) * 100}%`
@@ -82,10 +82,10 @@ export function PlaybackControls({
               />
             )}
             <div
-              className={`h-full transition-none pointer-events-none relative z-10 ${theme === 'dark' ? 'bg-white' : 'bg-black'}`}
+              className="h-full transition-none pointer-events-none relative z-10 bg-spectrum"
               style={{ width: (duration > 0 ? (playbackTime / duration) * 100 : 0) + '%' }}
             >
-              <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full opacity-0 group-hover:opacity-100 transition-opacity ${theme === 'dark' ? 'bg-white' : 'bg-black'}`} />
+              <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full opacity-0 group-hover:opacity-100 transition-opacity bg-ember-500`} />
             </div>
           </div>
           <div className={`flex justify-between mt-1.5 sm:mt-2 text-sm font-mono tabular-nums ${t.textMuted}`}>

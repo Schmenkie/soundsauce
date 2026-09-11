@@ -21,7 +21,7 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 |----------|------------|
 | Language | JavaScript (JSX), ES2020+ |
 | Framework | React 19 + Vite 7 |
-| Styling | Tailwind CSS 4 (custom theme in `src/index.css` `@theme` — **not** `tailwind.config.js`) |
+| Styling | Tailwind CSS 4 — **Signal Deck** theme in `src/index.css` `@theme` (not `tailwind.config.js`); colour system in `src/utils/spectrum.js` |
 | Audio | Web Audio API + Web Worker DSP (`src/workers/audio.worker.js`) |
 | Track import | **Local helper** (`helper/remix-helper.mjs`, yt-dlp + ffmpeg on the Mac, `localhost:7331`) — paste a YouTube/SoundCloud link or search by name → FLAC + metadata |
 | Stem separation | Demucs on Replicate (`cjwbw/demucs`, models `htdemucs_ft` / `htdemucs` / `htdemucs_6s`), FLAC output |
@@ -269,79 +269,27 @@ Custom hook encapsulating all Web Audio API logic with proper memory leak preven
 - Keep responsive design in mind (use `md:`, `sm:` breakpoints)
 - Minimum touch targets of 44px for mobile
 
-### Design System
+### Design System — Signal Deck
 
-**Theme: Obsidian Ember** — Two distinct themes unified by amber/gold accent:
-- **Dark Mode:** True black with warm amber/gold accent (Obsidian Ember)
-- **Light Mode:** Warm stone tones with amber accent
+**Concept: colour is frequency.** Five hues map to five regions of the spectrum, low → high, and every coloured thing in the app derives from that mapping (`src/utils/spectrum.js`):
 
-**Typography:**
-| Role | Font | Source |
-|------|------|--------|
-| Display/Headings | Satoshi | Fontshare |
-| Body/UI | General Sans | Fontshare |
-| Code/Data | JetBrains Mono | Google Fonts |
-| Fallback | DM Sans | Google Fonts |
+| Region | Hue | Hex | Used for |
+|---|---|---|---|
+| sub / bass | violet | `#8B5CF6` | bass stems, low-end readouts |
+| low-mids | blue | `#3B82F6` | piano / instrumental stems, key chip |
+| mids | green | `#22C55E` | guitar stems, "kept/done" is the one semantic green (`#34D399`) |
+| high-mids | yellow | `#FACC15` | drums stems, **the single accent** (`ember-*` scale now points here), BPM chip, playhead, primary buttons |
+| air | red | `#EF4444` | vocal stems, errors |
 
-Tailwind classes: `font-display` (Satoshi), `font-sans` (General Sans), `font-mono` (JetBrains Mono)
-
-**Color Palette:**
-| Element | Dark Theme | Light Theme |
-|---------|-----------|-------------|
-| Background | `#09090B` (zinc-950) | `#FAFAF9` (stone-50) |
-| Card/Surface | `#18181B` (zinc-900) | `#FFFFFF` (white) |
-| Elevated Surface | `#27272A` (zinc-800) | `#F5F5F4` (stone-100) |
-| Border | `#3F3F46` (zinc-700) | `#E7E5E4` (stone-200) |
-| Border Subtle | `#27272A` (zinc-800) | `#F5F5F4` (stone-100) |
-| Text Primary | `#FAFAFA` (zinc-50) | `#1C1917` (stone-900) |
-| Text Muted | `#A1A1AA` (zinc-400) | `#57534E` (stone-500) |
-| Text Dimmed | `#71717A` (zinc-500) | `#A8A29E` (stone-400) |
-| Accent | `#F59E0B` (ember-500) | `#D97706` (ember-600) |
-| Accent Hover | `#D97706` (ember-600) | `#B45309` (ember-700) |
-| Accent Subtle | `rgba(245, 158, 11, 0.15)` | `rgba(217, 119, 6, 0.1)` |
-| Success | `#22C55E` | `#16A34A` |
-| Error | `#EF4444` | `#DC2626` |
-
-**Custom Tailwind Colors:** `ember-50` through `ember-900` (amber-based), `zinc-50` through `zinc-950`. Defined in `tailwind.config.js`.
-
-**Design Principles:**
-- **Rounded corners (Resend-inspired)** - Cards: `rounded-lg` (8px), buttons: `rounded-md` (6px), inputs: `rounded-md`, tags/badges: `rounded-full` (pill), avatars: `rounded-full`, modals: `rounded-lg`. Exceptions: waveform canvas + spectrum analyzer stay squared (DAW-style)
-- **No emojis** - Use lucide-react icons instead
-- **Dark mode:** True black (#09090B) with zinc surfaces, amber accent for interactive elements
-- **Light mode:** Warm stone tones with amber-600 accent for primary actions
-
-**Button Styles:**
-```jsx
-// Default button (dark theme)
-className="bg-zinc-800 text-zinc-50 hover:bg-zinc-700 rounded-md"
-
-// Primary button (dark theme) - amber accent
-className="bg-ember-500 text-zinc-950 hover:bg-ember-600 rounded-md font-medium"
-
-// Primary button (light theme) - amber accent
-className="bg-ember-600 text-white hover:bg-ember-700 rounded-md font-medium"
-
-// Secondary button (light theme)
-className="bg-stone-900 text-white hover:bg-stone-800 rounded-md"
-```
-
-**Card Styles:**
-```jsx
-// Dark theme
-className="bg-zinc-900 border-zinc-700 rounded-lg"
-
-// Light theme
-className="bg-white border-stone-200 rounded-lg"
-```
-
-**Navigation Active State:**
-```jsx
-// Dark theme
-className="bg-zinc-800 text-zinc-50 rounded-lg"
-
-// Light theme
-className="bg-amber-50 text-amber-700 rounded-lg"
-```
+- **Waveforms are coloured by spectral centroid** — the worker's `GENERATE_WAVEFORM_COLORS` returns one t∈[0,1] per column (2048-pt FFT, log scale 40 Hz–12 kHz); `WaveformVisualizer` strokes each pixel column in `spectrumColor(t)` (dimmed when unplayed, full when played). Stem waveforms get their own map.
+- **SpectrumAnalyzer** bars wear the colour of their frequency; the ruler under it is the legend for the whole system. `MiniSpectrum` (5-band meter, one bar per hue) sits in every stem card and animates from `spectrumDataRef` while that stem plays.
+- **Stem strips** (`StemSelector`): left colour stripe from `stemColor(type)`, Syne uppercase title, mono readout grid (`format` / `state`), live meter, mono lowercase buttons.
+- **Ground**: near-black `#050607` with a 40px hairline grid (`.bg-grid-dark` / `.bg-grid-light`); panels `#0D0F12`, elevated `#14171C`, hairlines `#1C2027`. Light theme: `#F5F6F8` ground, white panels, `#D9DDE3` hairlines. Neutrals are blue-biased; `zinc-*` / `stone-*` / `amber-*` Tailwind tokens are **re-pointed in `@theme`** so legacy classes re-skin automatically.
+- **Utilities** (`index.css`): `.bg-spectrum`, `.bg-spectrum-v`, `.text-spectrum`, `.rule-spectrum` (2px gradient rule — under headers, along the Analyze button's bottom edge), `.ring-signal` (active control glow).
+- **Typography**: Syne (display — uppercase, bold, tracked; titles, step names, card headers), Albert Sans (body), DM Mono (all numbers, readouts, secondary buttons, placeholders). Tailwind: `font-display`, `font-sans`, `font-mono`. Loaded from Google Fonts in `index.html`.
+- **Shape**: `rounded-md` (6px) controls, `rounded-lg` panels, hairline borders instead of shadows. Waveform canvas + analyzer stay squared.
+- **Not Ableton-themed** — explicitly. Instrument-like and data-driven, but its own thing.
+- The old Obsidian Ember amber/zinc palette lives at `c28e4f0` and in the `Remix Lab Directions` artifact (`https://claude.ai/code/artifact/476424f9-9c06-4a98-9488-51c87cb306d2`, which also holds the two rejected directions).
 
 ### Code Organization
 - Group related useState hooks together
@@ -404,7 +352,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 | 1 | **Vocal Grab** | ✅ Done | Modes, FLAC, Keep-to-Blob, stamped filenames, Remix Pack zip, quick BPM/key chip |
 | 2 | **Strip the site + drop Supabase** | ✅ Done | 160 files deleted; lab password auth; localStorage prefs |
 | 2b | **Link import (local helper)** | ✅ Done | yt-dlp companion; paste a YouTube/SoundCloud link or search by name; FLAC + artist/title/artwork |
-| 2c | **Creative UI pass** | Next | Colorful, interactive, creative (explicitly *not* Ableton-themed). Mock drafts first, then implement |
+| 2c | **Signal Deck UI** | ✅ Foundation done | Chosen from 3 mock directions. Tokens, fonts, grid, Dock, header, frequency-coloured waveform, spectrum analyzer, stem channel strips with live meters. Remaining: AnalysisStepFlow content cards, Settings polish |
 | 3 | **Acapella Vault** (`/vault`, `/vault/:id`) | Next | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
 | 4 | **Remix Calculator** (`/calc`) | Planned | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
 | 5 | **Stem Player + Arrangement Map** | Planned | Synced mute/solo of all stems; stacked stem waveforms with a bar grid from BPM (stem waveform data is already cached per stem in Analyze) |
@@ -422,6 +370,13 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Signal Deck UI — foundation** (Sep 2026)
+  - Direction chosen from the `Remix Lab Directions` mock deck (Neon Playground / Riso Studio / Signal Deck) with the spectrum widened to purple → blue → green → yellow → red.
+  - `src/utils/spectrum.js` (SPECTRUM, spectrumColor/Rgb, hzToSpectrumT, STEM_COLORS, BAND_COLORS); `@theme` tokens for spec-* colours, ember re-pointed to yellow, zinc/stone/amber re-pointed to blue-biased neutrals; Syne / Albert Sans / DM Mono replace Satoshi / General Sans / JetBrains Mono.
+  - Worker `GENERATE_WAVEFORM_COLORS` + `useAudioWorker.generateWaveformColors` + `waveformColorRef` on `useAudioProcessor` (and per-stem `stemWaveformColorRef` in Analyze); `WaveformVisualizer` takes `waveformColorRef` and strokes columns in spectrum colour via a run-batched `strokeColumns` helper (dim unplayed / full played), yellow playhead, spectrum-tinted loop.
+  - `SpectrumAnalyzer` rewritten (bars coloured by frequency, legend rule); `MiniSpectrum` five-band meter (rAF, no React re-render); `StemSelector` channel strips (colour stripe, mono readout, meter, `spectrumDataRef` prop from Analyze); mode picker shows stem colour strips.
+  - Dock, PageLayout grid (`bg-grid-dark/light`), Lab header (Syne title, mono line, BPM/key chips), `AnalyzeSection` (spectrum rule edge), `PlaybackControls` (spectrum progress, yellow play), `LinkImport` (`>` prompt, mono), `Step` typography.
+  - Verified in both themes with a live stem playing.
 - [x] **Link import via local helper** (Sep 2026)
   - `helper/remix-helper.mjs`: Node server wrapping yt-dlp + ffmpeg on localhost:7331 with CORS + PNA headers; `/resolve` handles URLs, playlists and free-text search across YouTube and SoundCloud; `/jobs` downloads to FLAC with embedded metadata, cover art and `info.json`, reports phase/progress, copies the result to `~/Music/Remix Lab/Sources/`. `helper/install-launchagent.sh` for a login item.
   - Frontend: `src/lib/helper.js`, `useHelper` hook, `LinkImport` component (offline setup card, paste/search, clipboard suggestion, results with artwork + platform badge, progress). `Analyze.handleImported()` + shared `resetForNewAudio()`; header shows artwork; `audioMetadata` gains `thumbnailUrl`/`sourceUrl`/`source`.

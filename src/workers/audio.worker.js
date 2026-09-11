@@ -2803,6 +2803,43 @@ self.onmessage = function(e) {
         break;
       }
 
+      case 'GENERATE_WAVEFORM_COLORS': {
+        // Signal Deck: colour the waveform by frequency content. For each of N columns
+        // across the track, take a 2048-sample Hann-windowed FFT and compute the spectral
+        // centroid; map it onto [0,1] with a log scale from 40 Hz to 12 kHz (matches
+        // utils/spectrum.js hzToSpectrumT). Returns a Float32Array of t values.
+        const channelData = new Float32Array(payload.channelData);
+        const sampleRate = payload.sampleRate;
+        const numColumns = Math.max(16, Math.min(2048, payload.numColumns || 512));
+        const win = 2048;
+        const total = channelData.length;
+        const out = new Float32Array(numColumns);
+        const binHz = sampleRate / win;
+        const lo = Math.log10(40), hi = Math.log10(12000);
+        const slice = new Float32Array(win);
+        for (let c = 0; c < numColumns; c++) {
+          const center = Math.floor(((c + 0.5) / numColumns) * total);
+          const start = Math.max(0, Math.min(total - win, center - win / 2));
+          slice.fill(0);
+          slice.set(channelData.subarray(start, Math.min(total, start + win)));
+          const mags = computeMagnitudeSpectrum(slice, win);
+          let num = 0, den = 0;
+          // skip DC and anything above 16 kHz — cymbal sizzle shouldn't drag the centroid
+          const maxBin = Math.min(mags.length, Math.floor(16000 / binHz));
+          for (let b = 1; b < maxBin; b++) {
+            const m = mags[b];
+            num += m * b * binHz;
+            den += m;
+          }
+          const centroid = den > 1e-6 ? num / den : 0;
+          out[c] = centroid > 0
+            ? Math.min(1, Math.max(0, (Math.log10(centroid) - lo) / (hi - lo)))
+            : -1; // -1 = silence, renderer falls back to neutral
+        }
+        self.postMessage({ type: 'SUCCESS', id, result: { colors: out.buffer, numColumns } }, [out.buffer]);
+        return;
+      }
+
       case 'GENERATE_WAVEFORM_DATA': {
         const channelData = new Float32Array(payload.channelData);
         const totalSamples = channelData.length;
