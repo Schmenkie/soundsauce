@@ -3,11 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   Headphones,
   Download,
-  UserPlus,
   Sliders,
   Settings,
-  Compass,
-  ArrowRight,
   Wrench,
   BookOpen,
   ChevronDown,
@@ -19,7 +16,6 @@ import { InstrumentSelector, PresetSelector } from '../audio';
 import { ADSREnvelope, SoundSauce, VitalGuide, StepFlow, Step } from '../analysis';
 import { instrumentLabels } from '../../utils/constants';
 import { getDAWRecipe } from '../../data/dawPlugins';
-import { trackSavePromptConverted, trackSavePromptDismissed } from '../../lib/posthog';
 
 /**
  * Collapsible accordion for DAW-specific settings (Synthesis Type, VSTs, EQ, Effects).
@@ -117,9 +113,8 @@ export function AnalysisStepFlow({
   stems,
   aiDetectionStatus,
 
-  // Auth
-  user,
-  profile,
+  // Preferences
+  dawPreference,
 
   // Callbacks
   reAnalyzeWithInstrument,
@@ -127,19 +122,6 @@ export function AnalysisStepFlow({
   scrollToWaveform,
   handlePresetSelected,
   handlePresetDownloaded,
-
-  // Preset download tracking
-  hasDownloadedPreset,
-  trackCuratedDownload,
-
-  // Auth modal control
-  setAuthContext,
-  setShowAuthModal,
-  pendingPresetDownloadRef,
-
-  // Save prompt
-  dismissedSavePrompt,
-  setDismissedSavePrompt,
 }) {
   return (
     <StepFlow completedSteps={completedSteps} theme={theme}>
@@ -223,44 +205,6 @@ export function AnalysisStepFlow({
         onToggle={() => toggleStep(2)}
         theme={theme}
       >
-        {/* Guest sign-up prompt — contextual, near the download */}
-        {!user && !dismissedSavePrompt && (
-          <div className={`mb-4 p-4 rounded-lg border ${
-            theme === 'dark' ? 'bg-zinc-800 border-ember-500/20' : 'bg-amber-50/50 border-ember-500/15'
-          }`}>
-            <div className="flex items-center gap-3">
-              <UserPlus className={`w-5 h-5 flex-shrink-0 ${theme === 'dark' ? 'text-ember-500' : 'text-ember-600'}`} />
-              <div className="flex-1 min-w-0">
-                <span className={`text-sm font-medium ${t.text}`}>Sign up to download presets</span>
-                <span className={`text-xs ml-2 ${t.textDimmed}`}>Free, 10 seconds</span>
-              </div>
-              <button
-                onClick={() => {
-                  trackSavePromptConverted();
-                  setAuthContext({ action: 'save' });
-                  setShowAuthModal(true);
-                }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md flex-shrink-0 ${
-                  theme === 'dark'
-                    ? 'bg-ember-500 text-black hover:bg-ember-600'
-                    : 'bg-ember-600 text-white hover:bg-ember-700'
-                }`}
-              >
-                Sign Up
-              </button>
-              <button
-                onClick={() => {
-                  trackSavePromptDismissed();
-                  setDismissedSavePrompt(true);
-                }}
-                className={`text-xs ${t.textDimmed} ${theme === 'dark' ? 'hover:text-zinc-400' : 'hover:text-stone-500'} flex-shrink-0`}
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        )}
-
         <PresetSelector
           key={selectedInstrument}
           detectedInstrument={selectedInstrument}
@@ -269,17 +213,8 @@ export function AnalysisStepFlow({
           t={t}
           onPresetSelected={handlePresetSelected}
           onPresetDownloaded={handlePresetDownloaded}
-          hasDownloadedPreset={hasDownloadedPreset}
-          onTrackDownload={trackCuratedDownload}
           analysisFeatures={analysis?.features || null}
           wavetableData={wavetableData}
-          user={user}
-          onRequestAuth={(presetName) => {
-            pendingPresetDownloadRef.current = true;
-            setAuthContext({ action: 'download', detail: presetName });
-            setShowAuthModal(true);
-          }}
-          triggerDownload={pendingPresetDownloadRef}
           sourceAudioData={audioFileData}
         />
       </Step>
@@ -315,13 +250,11 @@ export function AnalysisStepFlow({
           <div className="flex items-center gap-2 mb-3">
             <Settings className={`w-4 h-4 ${t.textMuted}`} />
             <h3 className={`text-sm font-semibold ${t.text}`}>
-              {profile?.daw_preference || 'Ableton Live'} Recipe
+              {dawPreference || 'Ableton Live'} Recipe
             </h3>
-            {!profile?.daw_preference && (
-              <Link to="/settings" className={`text-xs ml-auto ${theme === 'dark' ? 'text-ember-500 hover:text-white' : 'text-ember-600 hover:underline'}`}>
-                Change DAW
-              </Link>
-            )}
+            <Link to="/settings" className={`text-xs ml-auto ${theme === 'dark' ? 'text-ember-500 hover:text-white' : 'text-ember-600 hover:underline'}`}>
+              Change DAW
+            </Link>
           </div>
 
           <SoundSauce
@@ -329,26 +262,13 @@ export function AnalysisStepFlow({
             theme={theme}
             t={t}
             selectedInstrument={selectedInstrument}
-            dawPreference={profile?.daw_preference}
+            dawPreference={dawPreference}
             showVitalSection={false}
           />
 
           <DAWSettingsAccordion analysis={analysis} theme={theme} t={t} />
         </div>
 
-        {/* Browse community link */}
-        <div className="mt-3">
-          <Link
-            to={`/discover${selectedInstrument && selectedInstrument !== 'full' ? `?tag=${encodeURIComponent(selectedInstrument)}` : ''}`}
-            className={`flex items-center gap-2 text-sm font-medium ${
-              theme === 'dark' ? 'text-ember-500 hover:text-white' : 'text-ember-600 hover:text-ember-700'
-            }`}
-          >
-            <Compass className="w-4 h-4" />
-            Browse similar Sound Sauces
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
       </Step>
 
       {/* ── Step 4: Deep Dive ── */}

@@ -170,11 +170,27 @@ export function useAudioWorker() {
     return postMessage('EXTRACT_WAVETABLE', { channelData: buffer, sampleRate, numFrames });
   }, [postMessage]);
 
+  /**
+   * Quick tempo + key detection (no full feature extraction). Used to stamp
+   * stem filenames with BPM/key as soon as a track is decoded.
+   * @param {Float32Array} channelData - Mono audio samples
+   * @param {number} sampleRate
+   * @returns {Promise<{ bpm: Object, key: Object }>}
+   */
+  const detectTempoAndKey = useCallback(async (channelData, sampleRate) => {
+    const [bpm, key] = await Promise.all([
+      postMessage('DETECT_BPM', { channelData: channelData.buffer.slice(0), sampleRate }),
+      postMessage('DETECT_KEY', { channelData: channelData.buffer.slice(0), sampleRate }),
+    ]);
+    return { bpm, key };
+  }, [postMessage]);
+
   return {
     isProcessing,
     progress,
     analyzeAudio,
     detectInstruments,
+    detectTempoAndKey,
     calculateSpectralMatch,
     detectHarmonics,
     generateWaveformData,

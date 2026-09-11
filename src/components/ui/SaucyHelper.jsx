@@ -5,53 +5,19 @@ import { X, ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
 /**
  * Contextual tips keyed by route pathname.
  * Each route has an array of { title, tip } objects.
- * The Analyze page has extra state-aware tips injected at render time.
  */
 const ROUTE_TIPS = {
-  '/analyze': [
-    { title: 'Upload Audio', tip: 'Drop any WAV, MP3, or M4A file to get started — or try our demo sound.' },
+  '/': [
+    { title: 'Drop a Track', tip: 'Drag in any WAV, MP3, or M4A. Tempo and key show up in the header as soon as it decodes.' },
+    { title: 'Grab Vocals', tip: 'Vocals + Instrumental is the remix default — two lossless FLACs stamped with BPM and key, ready for Live.' },
+    { title: 'Keep What Matters', tip: 'Unkept stems expire from Replicate after ~7 days. Hit Keep (or Keep all) to store them permanently.' },
+    { title: 'Remix Pack', tip: 'Downloads every stem plus notes.txt with tempo, key, Camelot neighbours and Ableton warp tips.' },
     { title: 'Select a Region', tip: 'Drag on the waveform to highlight a section. Analyzing a short, isolated region gives much more accurate results.' },
     { title: 'Keyboard Shortcuts', tip: 'Space to play/pause, L to toggle loop, Esc to clear selection, arrow keys to skip.' },
-    { title: 'Stem Separation', tip: 'For full songs, separate stems first to isolate vocals, drums, bass, or other instruments.' },
-    { title: 'Change Instrument', tip: 'After analysis, tap any detected instrument to instantly update the preset recommendation.' },
-    { title: 'Fine Tune Presets', tip: 'Expand "Fine Tune" below the preset to adjust filter, envelope, and effects with knobs.' },
-  ],
-  '/': [
-    { title: 'Welcome to SoundSauce', tip: 'Hear a sound you like? Upload it and we\'ll show you how to recreate it in your DAW.' },
-    { title: 'Try the Demo', tip: 'Head to the Analyze page and click "Try Demo Sound" to see how it works — no upload needed.' },
-    { title: 'Sound Sauces', tip: 'Sound Sauces are step-by-step recipes for recreating sounds. Browse them on the Discover page.' },
-  ],
-  '/discover': [
-    { title: 'Search & Filter', tip: 'Use the search bar to find Sound Sauces by title, or tap tags to filter by instrument type.' },
-    { title: 'Sort Options', tip: 'Switch between "Recent" and "Popular" to discover trending community creations.' },
-    { title: 'Vital Presets', tip: 'Look for the download icon — many Sound Sauces include a free Vital synth preset.' },
-  ],
-  '/search': [
-    { title: 'Find Everything', tip: 'Search for users, Sound Sauces, and presets all in one place.' },
-    { title: 'Follow Creators', tip: 'Follow producers whose sounds you like — their new recipes will appear in your home feed.' },
   ],
   '/settings': [
-    { title: 'Set Your DAW', tip: 'Choose your DAW preference to get tailored plugin recommendations in every analysis.' },
-    { title: 'Manage Subscription', tip: 'Pro users get unlimited analyses, stem separations, and cloud storage.' },
-  ],
-  '/pricing': [
-    { title: 'Free vs Pro', tip: 'Free gives you 10 analyses/month. Pro unlocks unlimited everything for $10/mo.' },
-  ],
-  '/profile': [
-    { title: 'Your Profile', tip: 'Customize your avatar, bio, and SoundCloud anthem to make your profile stand out.' },
-    { title: 'Badges', tip: 'Earn achievement badges by analyzing sounds, publishing recipes, and engaging with the community.' },
-  ],
-  '/notifications': [
-    { title: 'Stay Updated', tip: 'See when someone likes your Sound Sauce, follows you, or comments on your recipe.' },
-  ],
-  '/messages': [
-    { title: 'Direct Messages', tip: 'Message other producers to collaborate, give feedback, or ask about their sounds.' },
-  ],
-  '/challenges': [
-    { title: 'Weekly Challenges', tip: 'Try to recreate a reference sound — upload your attempt and see how close you got with spectral matching.' },
-  ],
-  '/my-presets': [
-    { title: 'Your Preset Library', tip: 'Browse all 40 starter presets or find community presets you\'ve downloaded.' },
+    { title: 'Set Your DAW', tip: 'Choose your DAW to get tailored plugin recommendations in every recipe.' },
+    { title: 'Lock the Lab', tip: 'Separation and uploads cost money, so they sit behind the lab password.' },
   ],
 };
 

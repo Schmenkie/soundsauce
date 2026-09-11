@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
-import { Clock, ChevronDown, ChevronUp, Trash2, X, Globe, Lock, Send, Zap } from 'lucide-react';
-import { PublishModal } from '../recipe';
+import React from 'react';
+import { Clock, ChevronDown, ChevronUp, Trash2, X } from 'lucide-react';
 
 // History Panel Component
-const HistoryPanel = ({ history, onLoad, onDelete, onClearAll, onTogglePublic, onPublish, freeTierPublishLabel, theme, isOpen, onToggle }) => {
-  const [publishItem, setPublishItem] = useState(null);
+const HistoryPanel = ({ history, onLoad, onDelete, onClearAll, theme, isOpen, onToggle }) => {
   const t = theme === 'dark' ? {
     card: 'bg-zinc-900',
     text: 'text-white',
@@ -70,46 +68,6 @@ const HistoryPanel = ({ history, onLoad, onDelete, onClearAll, onTogglePublic, o
                       </div>
                     </button>
                     <div className="flex items-center gap-1 ml-2">
-                      {item.isCloud && !item.isPublic && onPublish && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setPublishItem(item)}
-                            className={`p-2 transition-colors rounded-md ${
-                              theme === 'dark'
-                                ? 'text-zinc-500 hover:text-white hover:bg-zinc-800'
-                                : 'text-stone-400 hover:text-ember-600 hover:bg-amber-50/50'
-                            }`}
-                            title="Publish as Sound Sauce"
-                          >
-                            <Send className="w-4 h-4" />
-                          </button>
-                          {freeTierPublishLabel && (
-                            <span className={`flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${
-                              theme === 'dark' ? 'bg-zinc-800 text-zinc-400' : 'bg-amber-50 text-ember-600'
-                            }`}>
-                              <Zap className="w-2.5 h-2.5" />
-                              {freeTierPublishLabel}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {item.isCloud && onTogglePublic && (
-                        <button
-                          onClick={() => onTogglePublic(item.id)}
-                          className={`p-2 transition-colors rounded-md ${
-                            item.isPublic
-                              ? theme === 'dark'
-                                ? 'text-white bg-zinc-800 hover:bg-zinc-700'
-                                : 'text-ember-600 bg-amber-50 hover:bg-amber-100'
-                              : theme === 'dark'
-                                ? 'text-zinc-500 hover:text-zinc-400 hover:bg-zinc-800'
-                                : 'text-stone-400 hover:text-ember-600 hover:bg-amber-50/50'
-                          }`}
-                          title={item.isPublic ? 'Public — click to make private' : 'Private — click to make public'}
-                        >
-                          {item.isPublic ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-                        </button>
-                      )}
                       <button
                         onClick={() => onDelete(item.id)}
                         className={`p-2 transition-colors rounded-md ${t.button}`}
@@ -123,18 +81,6 @@ const HistoryPanel = ({ history, onLoad, onDelete, onClearAll, onTogglePublic, o
             </>
           )}
         </div>
-      )}
-      {publishItem && (
-        <PublishModal
-          item={publishItem}
-          theme={theme}
-          onPublish={async (id, data) => {
-            const success = await onPublish(id, data);
-            if (success) setPublishItem(null);
-            return success;
-          }}
-          onClose={() => setPublishItem(null)}
-        />
       )}
     </div>
   );

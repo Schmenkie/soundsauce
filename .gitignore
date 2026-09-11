@@ -33,3 +33,4 @@ scripts/audioset_labels.json
 .env.local.vercel
 .claude/settings.local.json
 __pycache__/
+public/__test/

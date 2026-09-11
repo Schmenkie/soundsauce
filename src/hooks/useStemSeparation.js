@@ -1,27 +1,82 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { upload } from '@vercel/blob/client';
+import { zipSync, strToU8 } from 'fflate';
 import { trackStemSeparationStarted, trackStemSeparationCompleted } from '../lib/posthog';
-import { supabase } from '../lib/supabase';
+import { labAuthHeaders, getLabToken } from '../lib/labAuth';
+import {
+  SEPARATION_MODES,
+  buildStemFilename,
+  buildPackFilename,
+  buildPackNotes,
+  sanitizeForFilename,
+} from '../utils/stemFiles';
 
 /**
  * Hook for managing stem separation workflow using Replicate API.
  *
  * Flow:
- * 1. User uploads audio -> separateStems() called
+ * 1. User uploads audio -> separateStems(audioData, filename, { mode }) called
  * 2. Audio uploaded to Vercel Blob storage (handles large files)
- * 3. Blob URL sent to /api/separate-stems -> Replicate prediction started
+ * 3. Blob URL + mode sent to /api/separate-stems -> Replicate prediction started
  * 4. Prediction ID returned, polling begins via /api/check-stems
- * 5. When complete, stem URLs are available
- * 6. User can download/load individual stems as ArrayBuffer
+ * 5. When complete, stem URLs are available (Replicate CDN, ~7 day TTL)
+ * 6. keepStem() re-hosts a stem on Vercel Blob so it never expires
+ *    (automatic in 'vocals' mode — the Remix Lab default)
+ * 7. downloadStemFile() / downloadRemixPack() save stamped FLACs locally
  */
-export function useStemSeparation() {
-  // Stem URLs from Replicate
-  const [stems, setStems] = useState(null);
-  // { vocals: url, drums: url, bass: url, other: url }
 
-  // Downloaded stem audio data (ArrayBuffers)
+const MIME_TYPES = {
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  webm: 'audio/webm',
+};
+
+/** File extension of a stem URL (Replicate returns .flac now, legacy sessions have .mp3). */
+function extFromUrl(url, fallback = 'flac') {
+  try {
+    const path = new URL(url).pathname;
+    const ext = path.split('.').pop()?.toLowerCase();
+    return ext && ext.length <= 4 ? ext : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Infer separation mode from the set of stem keys (for restored sessions with no saved mode). */
+function inferMode(stems) {
+  if (!stems) return 'stems4';
+  const keys = Object.keys(stems).filter(k => stems[k]);
+  if (keys.includes('guitar') || keys.includes('piano')) return 'stems6';
+  if (keys.length === 2 && keys.includes('vocals') && keys.includes('other')) return 'vocals';
+  return 'stems4';
+}
+
+/** Trigger a browser download of a Blob with a given filename. */
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Give the browser a tick to start the download before revoking
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function useStemSeparation() {
+  // Stem URLs — keys depend on mode: { vocals, other } | { vocals, drums, bass, other } | 6-stem
+  const [stems, setStems] = useState(null);
+
+  // Which separation mode produced the current stems
+  const [mode, setMode] = useState('vocals');
+
+  // Downloaded stem audio data (ArrayBuffers) keyed by stem type
   const [stemAudioData, setStemAudioData] = useState({});
-  // { vocals: ArrayBuffer, drums: ArrayBuffer, ... }
 
   // Vercel Blob URL of the original audio (persists indefinitely, used for session restore)
   const [blobUrl, setBlobUrl] = useState(null);
@@ -35,11 +90,17 @@ export function useStemSeparation() {
   // Error message if any
   const [error, setError] = useState(null);
 
+  // Per-stem persistence state: { [stemType]: 'saving' | 'saved' | 'error' }
+  const [keepStatus, setKeepStatus] = useState({});
+
   // Prediction ID for polling
   const predictionIdRef = useRef(null);
 
   // HMAC ownership token returned by separate-stems; passed to check-stems to prevent IDOR
   const predictionTokenRef = useRef(null);
+
+  // Whether to auto-persist stems to Blob once the current separation finishes
+  const autoKeepRef = useRef(false);
 
   // Polling interval ref
   const pollIntervalRef = useRef(null);
@@ -54,9 +115,13 @@ export function useStemSeparation() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Ref synced with stemAudioData to avoid stale closures in callbacks
+  // Refs synced with state to avoid stale closures in callbacks
   const stemAudioDataRef = useRef(stemAudioData);
   useEffect(() => { stemAudioDataRef.current = stemAudioData; }, [stemAudioData]);
+  const stemsRef = useRef(stems);
+  useEffect(() => { stemsRef.current = stems; }, [stems]);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
   /**
    * Stop polling for prediction status
@@ -76,19 +141,114 @@ export function useStemSeparation() {
   useEffect(() => () => { stopPolling(); }, [stopPolling]);
 
   /**
+   * Fetch a stem's audio as an ArrayBuffer (cached). Detects expired Replicate URLs.
+   * Internal — does not touch `status` so it can run in the background.
+   */
+  const fetchStemBuffer = useCallback(async (stemType) => {
+    if (stemAudioDataRef.current[stemType]) {
+      return stemAudioDataRef.current[stemType];
+    }
+    const url = stemsRef.current?.[stemType];
+    if (!url) throw new Error(`No ${stemType} stem available`);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (response.status === 403 || response.status === 404) {
+        const err = new Error('Stem URLs have expired. Click "Separate" to re-process.');
+        err.code = 'EXPIRED';
+        throw err;
+      }
+      throw new Error(`Failed to download ${stemType} stem`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    if (mountedRef.current) {
+      setStemAudioData(prev => ({ ...prev, [stemType]: arrayBuffer }));
+    }
+    stemAudioDataRef.current = { ...stemAudioDataRef.current, [stemType]: arrayBuffer };
+    return arrayBuffer;
+  }, []);
+
+  /**
+   * Re-host one stem on Vercel Blob so it survives Replicate's ~7-day CDN expiry.
+   * Replaces stems[stemType] with the permanent URL on success.
+   *
+   * Storage note: Vercel Hobby includes ~1GB of Blob storage. A FLAC stem of a
+   * 4-minute track is ~20-30MB, so this is deliberately opt-in outside vocals mode.
+   */
+  const keepStem = useCallback(async (stemType, meta = {}) => {
+    const url = stemsRef.current?.[stemType];
+    if (!url) return null;
+    // Already on our Blob store — nothing to do
+    if (/\.public\.blob\.vercel-storage\.com/.test(url)) {
+      setKeepStatus(prev => ({ ...prev, [stemType]: 'saved' }));
+      return url;
+    }
+
+    setKeepStatus(prev => ({ ...prev, [stemType]: 'saving' }));
+    try {
+      const buffer = await fetchStemBuffer(stemType);
+      const ext = extFromUrl(url);
+      const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+      const filename = buildStemFilename(meta, stemType, modeRef.current, ext);
+      const folder = sanitizeForFilename(meta.title) || 'untitled';
+      const file = new File([buffer], filename, { type: mimeType });
+
+      const result = await upload(`stems/${folder}/${filename}`, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload-audio',
+        headers: labAuthHeaders(),
+      });
+
+      if (!result?.url) throw new Error('Upload returned no URL');
+
+      if (mountedRef.current) {
+        setStems(prev => (prev ? { ...prev, [stemType]: result.url } : prev));
+        setKeepStatus(prev => ({ ...prev, [stemType]: 'saved' }));
+      }
+      stemsRef.current = { ...stemsRef.current, [stemType]: result.url };
+      return result.url;
+    } catch (err) {
+      console.error(`Keep ${stemType} error:`, err);
+      if (mountedRef.current) {
+        setKeepStatus(prev => ({ ...prev, [stemType]: 'error' }));
+        if (err.code === 'EXPIRED') {
+          setError(err.message);
+          setStatus('expired');
+        }
+      }
+      return null;
+    }
+  }, [fetchStemBuffer]);
+
+  /**
+   * Re-host every available stem (sequentially — keeps memory and bandwidth sane).
+   */
+  const keepAllStems = useCallback(async (meta = {}) => {
+    const current = stemsRef.current;
+    if (!current) return {};
+    const results = {};
+    for (const stemType of Object.keys(current)) {
+      if (current[stemType]) {
+        results[stemType] = await keepStem(stemType, meta);
+      }
+    }
+    return results;
+  }, [keepStem]);
+
+  // Metadata to use when auto-keeping (set by separateStems from the caller's meta)
+  const autoKeepMetaRef = useRef({});
+
+  /**
    * Poll for prediction status
    */
   const pollStatus = useCallback(async () => {
     if (!predictionIdRef.current) return;
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
       const token = predictionTokenRef.current || '';
       const response = await fetch(
         `/api/check-stems?id=${predictionIdRef.current}&token=${encodeURIComponent(token)}`,
-        {
-          headers: session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {},
-        }
+        { headers: labAuthHeaders() }
       );
 
       if (!response.ok) {
@@ -108,11 +268,18 @@ export function useStemSeparation() {
         // Separation complete!
         stopPolling();
         setStems(data.stems);
+        stemsRef.current = data.stems;
         setStatus('ready');
         setProgress(100);
         predictionIdRef.current = null;
         predictionTokenRef.current = null;
         trackStemSeparationCompleted();
+
+        // Vocals mode: re-host both files right away so the vault entry never expires
+        if (autoKeepRef.current) {
+          autoKeepRef.current = false;
+          keepAllStems(autoKeepMetaRef.current);
+        }
       } else if (data.status === 'failed') {
         // Separation failed
         stopPolling();
@@ -126,55 +293,61 @@ export function useStemSeparation() {
       console.error('Polling error:', err);
       // Don't stop polling on transient errors, just log
     }
-  }, [stopPolling]);
+  }, [stopPolling, keepAllStems]);
 
   /**
    * Start stem separation process
    * @param {ArrayBuffer} audioData - The audio file as ArrayBuffer
-   * @param {string} filename - Original filename for the upload
+   * @param {string} filename - Original filename for the upload (extension matters for MIME)
+   * @param {object} [options]
+   * @param {'vocals'|'stems4'|'stems6'} [options.mode='vocals']
+   * @param {'best'|'fast'} [options.quality='best']
+   * @param {boolean} [options.autoKeep] - Re-host stems on Blob when done (default: mode === 'vocals')
+   * @param {object} [options.meta] - { artist, title, bpm, key } used for persisted filenames
    * @returns {Promise<boolean>} - True if started successfully
    */
-  const separateStems = useCallback(async (audioData, filename = 'audio.mp3') => {
+  const separateStems = useCallback(async (audioData, filename = 'audio.mp3', options = {}) => {
     if (!audioData) {
       setError('No audio data provided');
       return false;
     }
 
+    const selectedMode = SEPARATION_MODES.some(m => m.id === options.mode) ? options.mode : 'vocals';
+    const quality = options.quality === 'fast' ? 'fast' : 'best';
+    autoKeepRef.current = options.autoKeep ?? (selectedMode === 'vocals');
+    autoKeepMetaRef.current = options.meta || {};
+
     // Reset state
     setStems(null);
+    stemsRef.current = null;
     setStemAudioData({});
+    stemAudioDataRef.current = {};
+    setKeepStatus({});
     setError(null);
     setProgress(0);
     setStatus('uploading');
+    setMode(selectedMode);
+    modeRef.current = selectedMode;
     stopPolling();
 
     try {
       // Step 1: Upload to Vercel Blob
       setProgress(5);
 
-      // Detect MIME type from filename extension
       const extension = filename.split('.').pop()?.toLowerCase() || 'mp3';
-      const mimeTypes = {
-        'mp3': 'audio/mpeg',
-        'wav': 'audio/wav',
-        'flac': 'audio/flac',
-        'ogg': 'audio/ogg',
-        'm4a': 'audio/mp4',
-        'aac': 'audio/aac',
-        'webm': 'audio/webm',
-      };
-      const mimeType = mimeTypes[extension] || 'audio/mpeg';
+      const mimeType = MIME_TYPES[extension] || 'audio/mpeg';
 
       // Convert ArrayBuffer to Blob for upload
       const audioBlob = new Blob([audioData], { type: mimeType });
       const file = new File([audioBlob], filename, { type: mimeType });
 
       // Upload to Vercel Blob using client upload (with timeout)
-      // Get auth token for upload endpoint
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeaders = session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : {};
+      if (!getLabToken()) {
+        const err = new Error('Unlock the lab to separate stems — it runs on a paid GPU.');
+        err.code = 'UNAUTHENTICATED';
+        throw err;
+      }
+      const authHeaders = labAuthHeaders();
 
       const uploadTimeout = 180000; // 3 minute timeout for upload (large audio files)
       const uploadPromise = upload(filename, file, {
@@ -211,14 +384,13 @@ export function useStemSeparation() {
       setStatus('processing');
 
       // Step 2: Start stem separation with the blob URL
-      // Reuse authHeaders from the upload step (same session)
       const response = await fetch('/api/separate-stems', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...authHeaders,
         },
-        body: JSON.stringify({ audioUrl: blobResult.url }),
+        body: JSON.stringify({ audioUrl: blobResult.url, mode: selectedMode, quality }),
       });
 
       if (!response.ok) {
@@ -245,17 +417,16 @@ export function useStemSeparation() {
       // Also poll immediately
       setTimeout(pollStatus, 500);
 
-      // Safety timeout: stop polling after 5 minutes (Demucs usually takes 30-90 seconds)
+      // Safety timeout: 10 minutes. htdemucs_ft on a long track can take 3-5 min.
       safetyTimeoutRef.current = setTimeout(() => {
         safetyTimeoutRef.current = null;
         if (pollIntervalRef.current) {
           stopPolling();
-          // Guard: skip setState if the component unmounted before the timeout fired
           if (!mountedRef.current) return;
           setError('Stem separation timed out. The process may still be running — try refreshing the page.');
           setStatus('error');
         }
-      }, 300000);
+      }, 600000);
 
       return true;
     } catch (err) {
@@ -267,60 +438,40 @@ export function useStemSeparation() {
   }, [stopPolling, pollStatus]);
 
   /**
-   * Download a specific stem and return as ArrayBuffer
-   * @param {string} stemType - 'vocals' | 'drums' | 'bass' | 'other'
+   * Download a specific stem and return as ArrayBuffer (updates status while fetching)
+   * @param {string} stemType
    * @returns {Promise<ArrayBuffer|null>}
    */
   const downloadStem = useCallback(async (stemType) => {
-    if (!stems || !stems[stemType]) {
+    if (!stemsRef.current || !stemsRef.current[stemType]) {
       setError(`No ${stemType} stem available`);
       return null;
     }
 
-    // Check if already downloaded (read from ref to avoid stale closure)
     if (stemAudioDataRef.current[stemType]) {
       return stemAudioDataRef.current[stemType];
     }
 
     try {
       setStatus('downloading');
-
-      const response = await fetch(stems[stemType]);
-
-      if (!response.ok) {
-        // Replicate CDN URLs expire after ~7 days — detect and surface gracefully
-        if (response.status === 403 || response.status === 404) {
-          setError('Stem URLs have expired. Click "Separate Stems" to re-process.');
-          setStatus('expired');
-          return null;
-        }
-        throw new Error(`Failed to download ${stemType} stem`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-
-      // Cache the downloaded stem
-      setStemAudioData(prev => ({
-        ...prev,
-        [stemType]: arrayBuffer
-      }));
-
+      const buffer = await fetchStemBuffer(stemType);
       setStatus('ready');
-      return arrayBuffer;
+      return buffer;
     } catch (err) {
       console.error(`Download ${stemType} error:`, err);
       setError(err.message || `Failed to download ${stemType} stem`);
-      setStatus('error');
+      setStatus(err.code === 'EXPIRED' ? 'expired' : 'error');
       return null;
     }
-  }, [stems]);
+  }, [fetchStemBuffer]);
 
   /**
    * Download all stems at once
    * @returns {Promise<Object>} - Object with all stem ArrayBuffers
    */
   const downloadAllStems = useCallback(async () => {
-    if (!stems) {
+    const current = stemsRef.current;
+    if (!current) {
       setError('No stems available');
       return null;
     }
@@ -328,28 +479,64 @@ export function useStemSeparation() {
     setStatus('downloading');
     setProgress(0);
 
-    const stemTypes = ['vocals', 'drums', 'bass', 'other'];
+    const stemTypes = Object.keys(current).filter(k => current[k]);
     const results = {};
     let completed = 0;
 
     for (const stemType of stemTypes) {
-      if (stems[stemType]) {
-        const data = await downloadStem(stemType);
-        if (data) {
-          results[stemType] = data;
-        }
-        completed++;
-        setProgress(Math.floor((completed / stemTypes.length) * 100));
-      }
+      const data = await downloadStem(stemType);
+      if (data) results[stemType] = data;
+      completed++;
+      setProgress(Math.floor((completed / stemTypes.length) * 100));
     }
 
     setStatus('ready');
     return results;
-  }, [stems, downloadStem]);
+  }, [downloadStem]);
+
+  /**
+   * Save one stem to disk with a stamped filename, e.g.
+   * "Artist - Title - 124bpm - Am - vocals.flac"
+   * @param {string} stemType
+   * @param {object} meta - { artist, title, bpm, key }
+   */
+  const downloadStemFile = useCallback(async (stemType, meta = {}) => {
+    const url = stemsRef.current?.[stemType];
+    if (!url) return false;
+    const buffer = await downloadStem(stemType);
+    if (!buffer) return false;
+    const ext = extFromUrl(url);
+    const blob = new Blob([buffer], { type: MIME_TYPES[ext] || 'application/octet-stream' });
+    saveBlob(blob, buildStemFilename(meta, stemType, modeRef.current, ext));
+    return true;
+  }, [downloadStem]);
+
+  /**
+   * Save every stem plus a notes.txt (BPM, key, Camelot, compatible keys, Ableton tips)
+   * as a single "Remix Pack" zip. Stored uncompressed — FLAC is already compressed.
+   * @param {object} meta - { artist, title, bpm, key, ... }
+   */
+  const downloadRemixPack = useCallback(async (meta = {}) => {
+    const buffers = await downloadAllStems();
+    if (!buffers || Object.keys(buffers).length === 0) return false;
+
+    const currentMode = modeRef.current;
+    const stemTypes = Object.keys(buffers);
+    const entries = {};
+    for (const stemType of stemTypes) {
+      const ext = extFromUrl(stemsRef.current[stemType]);
+      entries[buildStemFilename(meta, stemType, currentMode, ext)] = new Uint8Array(buffers[stemType]);
+    }
+    entries['notes.txt'] = strToU8(buildPackNotes(meta, stemTypes, currentMode));
+
+    const zipped = zipSync(entries, { level: 0 });
+    saveBlob(new Blob([zipped], { type: 'application/zip' }), buildPackFilename(meta));
+    return true;
+  }, [downloadAllStems]);
 
   /**
    * Get stem audio data (download if needed)
-   * @param {string} stemType - 'vocals' | 'drums' | 'bass' | 'other'
+   * @param {string} stemType
    * @returns {Promise<ArrayBuffer|null>}
    */
   const getStemAudio = useCallback(async (stemType) => {
@@ -365,13 +552,17 @@ export function useStemSeparation() {
   const clearStems = useCallback(() => {
     stopPolling();
     setStems(null);
+    stemsRef.current = null;
     setStemAudioData({});
+    stemAudioDataRef.current = {};
+    setKeepStatus({});
     setBlobUrl(null);
     setStatus('idle');
     setProgress(0);
     setError(null);
     predictionIdRef.current = null;
     predictionTokenRef.current = null;
+    autoKeepRef.current = false;
   }, [stopPolling]);
 
   /**
@@ -383,20 +574,31 @@ export function useStemSeparation() {
     setProgress(0);
     predictionIdRef.current = null;
     predictionTokenRef.current = null;
+    autoKeepRef.current = false;
     // Note: The Replicate prediction will continue, but we stop tracking it
   }, [stopPolling]);
 
   /**
    * Restore stems from saved URLs (session resume — no re-separation needed).
-   * Sets stems object and status to 'ready'. If URLs have expired, the next
-   * downloadStem() call will detect 403/404 and set status to 'expired'.
-   * @param {Object} savedStems - { vocals: url, drums: url, bass: url, other: url }
+   * @param {Object} savedStems - stem URL map
    * @param {string} [savedBlobUrl] - Optional Vercel Blob URL of the original audio
+   * @param {string} [savedMode] - Separation mode; inferred from the keys if omitted
    */
-  const restoreStems = useCallback((savedStems, savedBlobUrl) => {
+  const restoreStems = useCallback((savedStems, savedBlobUrl, savedMode) => {
     if (!savedStems) return;
+    const restoredMode = savedMode || inferMode(savedStems);
     setStems(savedStems);
+    stemsRef.current = savedStems;
+    setMode(restoredMode);
+    modeRef.current = restoredMode;
     setStemAudioData({});
+    stemAudioDataRef.current = {};
+    // Anything already on our Blob store is permanently kept
+    const restoredKeep = {};
+    for (const [k, url] of Object.entries(savedStems)) {
+      if (url && /\.public\.blob\.vercel-storage\.com/.test(url)) restoredKeep[k] = 'saved';
+    }
+    setKeepStatus(restoredKeep);
     setStatus('ready');
     setProgress(100);
     setError(null);
@@ -409,7 +611,7 @@ export function useStemSeparation() {
    * Check if a specific stem is available
    */
   const hasStem = useCallback((stemType) => {
-    return stems && stems[stemType];
+    return !!(stems && stems[stemType]);
   }, [stems]);
 
   /**
@@ -419,26 +621,39 @@ export function useStemSeparation() {
     return !!stemAudioData[stemType];
   }, [stemAudioData]);
 
+  /** Stem types available in the current result, in canonical display order */
+  const stemTypes = stems
+    ? ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'].filter(k => stems[k])
+    : [];
+
   return {
     // State
     stems,
+    stemTypes,
+    mode,
     stemAudioData,
     blobUrl,
     status,
     progress,
     error,
+    keepStatus,
 
     // Computed
     isProcessing: status === 'uploading' || status === 'processing',
     isReady: status === 'ready',
     isExpired: status === 'expired',
     hasStems: stems !== null,
+    isKeeping: Object.values(keepStatus).some(s => s === 'saving'),
 
     // Actions
     separateStems,
     restoreStems,
     downloadStem,
     downloadAllStems,
+    downloadStemFile,
+    downloadRemixPack,
+    keepStem,
+    keepAllStems,
     getStemAudio,
     clearStems,
     cancelSeparation,

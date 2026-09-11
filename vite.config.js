@@ -12,14 +12,21 @@ export default defineConfig({
       filename: 'dist/bundle-analysis.html',
     }),
   ].filter(Boolean),
+  server: {
+    proxy: {
+      // Serverless functions run locally via `npm run dev:api` (scripts/dev-api.mjs)
+      '/api': {
+        target: `http://localhost:${process.env.DEV_API_PORT || 3001}`,
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {
         manualChunks: {
           // Core React runtime — changes rarely, caches well
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          // Supabase client — auth + DB + storage
-          'vendor-supabase': ['@supabase/supabase-js'],
           // PostHog analytics
           'vendor-posthog': ['posthog-js'],
         },

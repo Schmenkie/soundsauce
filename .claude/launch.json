@@ -4,7 +4,23 @@
     {
       "name": "dev",
       "runtimeExecutable": "/usr/local/bin/npx",
-      "runtimeArgs": ["vite", "--port", "5173"],
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5173"
+      ],
+      "port": 5173,
+      "env": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin"
+      }
+    },
+    {
+      "name": "full",
+      "runtimeExecutable": "/usr/local/bin/npm",
+      "runtimeArgs": [
+        "run",
+        "dev:full"
+      ],
       "port": 5173,
       "env": {
         "PATH": "/usr/local/bin:/usr/bin:/bin"

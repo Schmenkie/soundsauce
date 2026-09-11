@@ -12,14 +12,15 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "dev:api": "node scripts/dev-api.mjs",
+    "dev:full": "concurrently -n vite,api -c cyan,yellow \"vite --port 5173\" \"node scripts/dev-api.mjs\""
   },
   "dependencies": {
     "@sentry/react": "^10.38.0",
-    "@supabase/supabase-js": "^2.95.3",
     "@tailwindcss/postcss": "^4.1.18",
     "@vercel/blob": "^2.0.1",
-    "dompurify": "^3.3.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.16.0",
     "motion": "^12.36.0",
     "posthog-js": "^1.345.2",
@@ -27,7 +28,6 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",
-    "stripe": "^20.3.1",
     "web-vitals": "^5.1.0"
   },
   "devDependencies": {
@@ -40,6 +40,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
+    "concurrently": "^9.2.4",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

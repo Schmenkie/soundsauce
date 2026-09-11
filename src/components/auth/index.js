@@ -1,1 +1,1 @@
-export { AuthModal } from './AuthModal';
+export { LabSignIn } from './LabSignIn';

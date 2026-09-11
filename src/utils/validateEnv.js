@@ -6,16 +6,13 @@
 export function validateEnv() {
   if (!import.meta.env.PROD) return; // Skip in dev — vars may be missing intentionally
 
-  const required = [
-    'VITE_SUPABASE_URL',
-    'VITE_SUPABASE_ANON_KEY',
-  ];
+  // The frontend needs nothing to boot; every secret lives server-side (LAB_PASSWORD,
+  // REPLICATE_API_TOKEN, BLOB_READ_WRITE_TOKEN, GEMINI_API_KEY) and is checked per endpoint.
+  const required = [];
 
   const optional = [
     'VITE_POSTHOG_KEY',
     'VITE_SENTRY_DSN',
-    'VITE_STRIPE_PUBLISHABLE_KEY',
-    'VITE_STRIPE_PRO_PRICE_ID',
   ];
 
   const missing = required.filter(key => !import.meta.env[key]);
@@ -31,7 +28,7 @@ export function validateEnv() {
   if (missingOptional.length > 0) {
     console.warn(
       `[SoundSauce] Missing optional environment variables: ${missingOptional.join(', ')}. ` +
-      'Some features (analytics, payments, error tracking) may be disabled.'
+      'Analytics / error tracking may be disabled.'
     );
   }
 }

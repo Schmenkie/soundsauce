@@ -1,19 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 // Hooks
-import { useAudioProcessor, useHistory, useStemSeparation, useSubscription, usePageTitle, useDownloadedPresets } from '../hooks';
+import { useAudioProcessor, useHistory, useStemSeparation, usePageTitle } from '../hooks';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { labAuthHeaders, getLabToken } from '../lib/labAuth';
 import { upload } from '@vercel/blob/client';
 
 // Components
-import { UpgradePrompt } from '../components/ui';
 import { useToast } from '../components/ui/Toast';
-import { AuthModal } from '../components/auth';
-import { useSearchParams } from 'react-router-dom';
+import { LabSignIn } from '../components/auth';
 import { HistoryPanel } from '../components/history';
 import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, InstrumentSelector, AnalyzeSection, StemSelector, PresetSelector } from '../components/audio';
-import { Music, Zap, UserPlus, Scissors, Sparkles, Loader2, ArrowLeft, BarChart3, AlertTriangle, UploadCloud } from 'lucide-react';
+import { Music, Scissors, Sparkles, Loader2, ArrowLeft, AlertTriangle, UploadCloud } from 'lucide-react';
 import { AnalysisStepFlow } from '../components/analysis';
 import { ExportToolbar } from '../components/comparison';
 
@@ -23,7 +21,7 @@ import { generateInstrumentRecommendations } from '../utils/recommendations';
 import { generateDemoSound, audioBufferToWav } from '../utils/demoSoundGenerator';
 
 // Analytics
-import { trackAudioUpload, trackAnalysisStarted, trackAnalysisCompleted, trackPresetExported, trackUsageBarShown, trackSavePromptShown, trackSavePromptConverted, trackSavePromptDismissed } from '../lib/posthog';
+import { trackAudioUpload, trackAnalysisStarted, trackAnalysisCompleted, trackPresetExported } from '../lib/posthog';
 
 
 // AI (Gemini) label → app instrument category mapping
@@ -64,9 +62,8 @@ const STEM_LABELS = {
  */
 export function Analyze({ theme, t }) {
   // Custom hooks
-  const { user, profile, tier } = useAuth();
+  const { isSignedIn, prefs } = useAuth();
   const audio = useAudioProcessor();
-  const subscription = useSubscription();
   const { toast } = useToast();
   const {
     history,
@@ -75,33 +72,36 @@ export function Analyze({ theme, t }) {
     addToHistory,
     deleteFromHistory,
     clearHistory,
-    togglePublic,
-    publishRecipe,
   } = useHistory();
   // Stem separation hook
   const {
     stems,
+    stemTypes,
+    mode: separationMode,
     stemAudioData,
     blobUrl: audioBlobUrl,
     status: separationStatus,
     progress: separationProgress,
     error: separationError,
+    keepStatus,
     separateStems,
-    restoreStems,
     getStemAudio,
     clearStems,
-    cancelSeparation
+    cancelSeparation,
+    downloadStemFile,
+    downloadRemixPack,
+    keepStem,
+    keepAllStems,
   } = useStemSeparation();
 
-  // URL params for session restore
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [isLoadingSession, setIsLoadingSession] = useState(false);
 
   // UI state
   const [audioFileData, setAudioFileData] = useState(null);
-  const [audioMetadata, setAudioMetadata] = useState({ title: '', artist: '' });
-  usePageTitle('Analyze', audioMetadata.title || undefined);
-  const { hasDownloadedPreset, trackCuratedDownload } = useDownloadedPresets();
+  const [audioMetadata, setAudioMetadata] = useState({ title: '', artist: '', sourceFilename: '' });
+  // Quick BPM/key detected right after decode (before any full analysis) — used to
+  // stamp stem filenames and show the tempo/key chip in the header
+  const [trackInfo, setTrackInfo] = useState(null);
+  usePageTitle('Lab', audioMetadata.title || undefined);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [wavetableData, setWavetableData] = useState(null);
@@ -117,15 +117,12 @@ export function Analyze({ theme, t }) {
   const [analyzingStemType, setAnalyzingStemType] = useState(null);
 
   // Upgrade prompt state
-  const [upgradePrompt, setUpgradePrompt] = useState({ isOpen: false, feature: null, used: 0, limit: 0 });
-  const [dismissedSavePrompt, setDismissedSavePrompt] = useState(false);
 
   // Step flow state — guided post-analysis experience
   const [expandedSteps, setExpandedSteps] = useState(new Set([1])); // Step 1 auto-expanded
   const [completedSteps, setCompletedSteps] = useState(new Set());
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authContext, setAuthContext] = useState(null);
-  const pendingPresetDownloadRef = useRef(false);
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [signInReason, setSignInReason] = useState(null);
 
   // Refs
   const dropZoneRef = useRef(null);
@@ -186,101 +183,39 @@ export function Analyze({ theme, t }) {
     prepareBuffer();
   }, [audioFileData]);
 
-  /**
-   * Load a saved analysis session by ID from Supabase.
-   * Restores: analysis results, metadata, audio waveform, and stems.
-   * @param {string} analysisId - Supabase UUID of the analysis row
-   */
-  const loadAnalysis = useCallback(async (analysisId) => {
-    if (!analysisId) return;
+  // Quick tempo + key detection as soon as the buffer is decoded, so stems can be
+  // stamped with BPM/key before (or without) a full analysis. Runs on up to the
+  // first 90s of mono audio in the worker; full analysis overrides it later.
+  const detectTempoAndKeyRef = useRef(audio.detectTempoAndKey);
+  useEffect(() => {
+    detectTempoAndKeyRef.current = audio.detectTempoAndKey;
+  }, [audio.detectTempoAndKey]);
 
-    setIsLoadingSession(true);
-    setError(null);
+  useEffect(() => {
+    const buffer = audio.audioBuffer;
+    setTrackInfo(null);
+    if (!buffer || !detectTempoAndKeyRef.current) return;
 
-    try {
-      const { data: row, error: fetchError } = await supabase
-        .from('analyses')
-        .select('*')
-        .eq('id', analysisId)
-        .single();
-
-      if (fetchError || !row) {
-        console.error('Failed to load analysis:', fetchError);
-        setError('Could not load analysis. It may have been deleted.');
-        setIsLoadingSession(false);
-        return;
-      }
-
-      // 1. Restore analysis results + metadata
-      const features = row.results?.features || {};
-      const recommendations = row.results?.recommendations || {};
-      const detectedInsts = row.results?.detectedInstruments || {};
-
-      setAnalysis({ features, recommendations, instrument: row.instrument });
-      setSelectedInstrument(row.instrument || 'full');
-      setDetectedInstruments(detectedInsts);
-      setAudioMetadata({ title: row.title || 'Untitled', artist: 'Restored session' });
-
-      // 2. Restore audio waveform if audio_url exists (Vercel Blob — persists indefinitely)
-      if (row.audio_url) {
-        try {
-          const audioResponse = await fetch(row.audio_url);
-          if (audioResponse.ok) {
-            const arrayBuffer = await audioResponse.arrayBuffer();
-            setAudioFileData(arrayBuffer);
-            // prepareAudioBuffer will fire via the existing useEffect when audioFileData changes
-          } else {
-            console.warn('Audio URL fetch failed:', audioResponse.status);
-          }
-        } catch (audioErr) {
-          console.warn('Failed to fetch saved audio:', audioErr);
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const sampleRate = buffer.sampleRate;
+        const maxSamples = Math.min(buffer.length, sampleRate * 90);
+        // Mono mixdown of the analysed window
+        const mono = new Float32Array(maxSamples);
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+          const data = buffer.getChannelData(c);
+          for (let i = 0; i < maxSamples; i++) mono[i] += data[i] / buffer.numberOfChannels;
         }
+        const result = await detectTempoAndKeyRef.current(mono, sampleRate);
+        if (!cancelled) setTrackInfo(result);
+      } catch (err) {
+        console.warn('Quick tempo/key detection failed:', err);
       }
-
-      // 3. Restore stems if stem_urls exist (Replicate CDN — may be expired)
-      if (row.stem_urls) {
-        restoreStems(row.stem_urls, row.audio_url);
-      }
-
-      // 4. Clear the ?id param so refreshing doesn't re-trigger load
-      setSearchParams({}, { replace: true });
-    } catch (err) {
-      console.error('Error loading analysis session:', err);
-      setError('Failed to restore analysis session.');
-    } finally {
-      setIsLoadingSession(false);
-    }
-  }, [restoreStems, setSearchParams]);
-
-  // On mount: check for ?id= URL param and load the saved analysis
-  const loadAnalysisRef = useRef(loadAnalysis);
-  useEffect(() => {
-    loadAnalysisRef.current = loadAnalysis;
-  }, [loadAnalysis]);
-
-  const lastLoadedIdRef = useRef(null);
-  useEffect(() => {
-    const analysisId = searchParams.get('id');
-    if (analysisId && analysisId !== lastLoadedIdRef.current) {
-      lastLoadedIdRef.current = analysisId;
-      loadAnalysisRef.current(analysisId);
-    }
-  }, [searchParams]);
-
-  // Track nudges shown
-  const usageBarTrackedRef = useRef(false);
-  const savePromptTrackedRef = useRef(false);
-  useEffect(() => {
-    if (!analysis) return;
-    if (user && tier === 'free' && subscription.usage && !usageBarTrackedRef.current) {
-      usageBarTrackedRef.current = true;
-      trackUsageBarShown(subscription.usage.analyses_count, subscription.limits.analyses);
-    }
-    if (!user && !dismissedSavePrompt && !savePromptTrackedRef.current) {
-      savePromptTrackedRef.current = true;
-      trackSavePromptShown();
-    }
-  }, [analysis, user, tier, subscription.usage, subscription.limits, dismissedSavePrompt]);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [audio.audioBuffer]);
 
   // IntersectionObserver: show floating Analyze button when AnalyzeSection scrolls out of view
   useEffect(() => {
@@ -472,10 +407,9 @@ export function Analyze({ theme, t }) {
       if (callId !== aiAbortRef.current) return;
 
       // Step 2: Upload to Vercel Blob
-      const { data: { session } } = await supabase.auth.getSession();
-      const authHeaders = session?.access_token
-        ? { Authorization: `Bearer ${session.access_token}` }
-        : {};
+      // Gemini detection uploads a WAV of the region; skip entirely when the lab is locked
+      if (!getLabToken()) return;
+      const authHeaders = labAuthHeaders();
 
       const audioBlob = new Blob([audioData], { type: 'audio/wav' });
       const file = new File([audioBlob], 'ai-analysis.wav', { type: 'audio/wav' });
@@ -569,17 +503,6 @@ export function Analyze({ theme, t }) {
   const runAnalysis = useCallback(async (stemTypeOverride) => {
     if (!audioFileData) {
       setError('Please upload or record audio first');
-      return;
-    }
-
-    // Check analysis limit before proceeding
-    if (!subscription.canAnalyze()) {
-      setUpgradePrompt({
-        isOpen: true,
-        feature: 'analyses',
-        used: subscription.usage?.analyses_count || 0,
-        limit: subscription.limits?.analyses || 10,
-      });
       return;
     }
 
@@ -692,7 +615,7 @@ export function Analyze({ theme, t }) {
       // Update selectedInstrument state to the smart default
       setSelectedInstrument(instrumentToUse);
 
-      const recommendations = generateInstrumentRecommendations(instrumentToUse, result.features, profile?.daw_preference);
+      const recommendations = generateInstrumentRecommendations(instrumentToUse, result.features, prefs.dawPreference);
       const newAnalysis = {
         features: result.features,
         recommendations,
@@ -714,13 +637,8 @@ export function Analyze({ theme, t }) {
         waveformType: result.features.waveform?.type,
       });
 
-      // Increment usage counter after successful analysis
-      if (subscription.incrementAnalyses) {
-        subscription.incrementAnalyses();
-      }
-
-      // Save to history (check storage limit first)
-      if (subscription.canSaveAnalysis()) {
+      // Save to history
+      {
         const isRegionAnalysis = analysisOptions.regionStart != null;
         // Strip any existing parenthetical suffix to prevent duplication
         // e.g. "Pumpin (bass)" → "Pumpin", "Pumpin (bass) (bass)" → "Pumpin"
@@ -753,7 +671,7 @@ export function Analyze({ theme, t }) {
     setIsAnalyzing(false);
     setAnalyzingStemType(null);
     toast.success('Analysis complete');
-  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, addToHistory, stems, stemAudioData, getStemAudio, profile?.daw_preference, subscription.canAnalyze, subscription.incrementAnalyses, runAIDetection, audioBlobUrl, toast]);
+  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, addToHistory, stems, stemAudioData, getStemAudio, prefs.dawPreference, runAIDetection, audioBlobUrl, toast]);
 
   // Quick re-analyze: regenerate recommendations for a different instrument
   // without re-running the full DSP pipeline (audio region hasn't changed)
@@ -768,14 +686,14 @@ export function Analyze({ theme, t }) {
       return;
     }
 
-    const recommendations = generateInstrumentRecommendations(instrument, analysis.features, profile?.daw_preference);
+    const recommendations = generateInstrumentRecommendations(instrument, analysis.features, prefs.dawPreference);
     setAnalysis(prev => ({
       ...prev,
       recommendations,
       instrument,
     }));
     setSelectedInstrument(instrument);
-  }, [analysis, profile?.daw_preference, stems]);
+  }, [analysis, prefs.dawPreference, stems]);
 
   // Keep reAnalyze ref in sync for CLAP callback
   useEffect(() => {
@@ -871,7 +789,7 @@ export function Analyze({ theme, t }) {
   const processAudioFile = (file) => {
     setError(null);
     const filename = file.name.replace(/\.[^/.]+$/, "");
-    setAudioMetadata({ title: filename, artist: 'Unknown Artist' });
+    setAudioMetadata({ title: filename, artist: 'Unknown Artist', sourceFilename: file.name });
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -933,28 +851,51 @@ export function Analyze({ theme, t }) {
   }, [isLoadingDemo, audio.reset, handleClearLoop, clearStems]);
 
   // Stem separation handlers
-  const handleSeparateStems = useCallback(async () => {
-    if (!audioFileData) return;
+  // Metadata used for stamped stem filenames + Remix Pack notes. Prefers the full
+  // analysis when it exists, falls back to the quick post-decode detection.
+  const stemMeta = React.useMemo(() => {
+    const bpmInfo = analysis?.features?.bpm || trackInfo?.bpm || null;
+    const keyInfo = analysis?.features?.key || trackInfo?.key || null;
+    return {
+      artist: audioMetadata.artist,
+      title: audioMetadata.title,
+      bpm: bpmInfo?.bpm ?? null,
+      bpmConfidence: bpmInfo?.confidence ?? null,
+      halfTempo: bpmInfo?.halfTempo ?? null,
+      doubleTempo: bpmInfo?.doubleTempo ?? null,
+      key: keyInfo ? { key: keyInfo.key, mode: keyInfo.mode, camelot: keyInfo.camelot, compatibleKeys: keyInfo.compatibleKeys } : null,
+    };
+  }, [analysis?.features?.bpm, analysis?.features?.key, trackInfo, audioMetadata.artist, audioMetadata.title]);
 
-    // Check stem separation limit
-    if (!subscription.canSeparateStems()) {
-      setUpgradePrompt({
-        isOpen: true,
-        feature: 'stems',
-        used: subscription.usage?.stems_count || 0,
-        limit: subscription.limits?.stems || 2,
-      });
+  const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best' } = {}) => {
+    if (!audioFileData) return;
+    if (!isSignedIn) {
+      setSignInReason('Stem separation runs on a paid GPU — unlock the lab first.');
+      setShowSignIn(true);
       return;
     }
 
-    const filename = audioMetadata.title ? `${audioMetadata.title}.mp3` : 'audio.mp3';
-    await separateStems(audioFileData, filename);
+    // Preserve the real extension so the Blob upload gets the right MIME type
+    const ext = (audioMetadata.sourceFilename || '').split('.').pop()?.toLowerCase();
+    const safeExt = ['wav', 'mp3', 'm4a', 'flac'].includes(ext) ? ext : 'mp3';
+    const filename = `${audioMetadata.title || 'audio'}.${safeExt}`;
 
-    // Increment stem usage after starting separation
-    if (subscription.incrementStems) {
-      subscription.incrementStems();
-    }
-  }, [audioFileData, audioMetadata.title, separateStems, subscription.canSeparateStems, subscription.incrementStems]);
+    await separateStems(audioFileData, filename, { mode, quality, meta: stemMeta });
+  }, [audioFileData, audioMetadata.title, audioMetadata.sourceFilename, separateStems, stemMeta, isSignedIn]);
+
+  const handleDownloadPack = useCallback(async () => {
+    const ok = await downloadRemixPack(stemMeta);
+    if (ok) toast.success('Remix Pack downloaded');
+  }, [downloadRemixPack, stemMeta, toast]);
+
+  const handleKeepStem = useCallback((stemType) => keepStem(stemType, stemMeta), [keepStem, stemMeta]);
+  const handleKeepAll = useCallback(() => keepAllStems(stemMeta), [keepAllStems, stemMeta]);
+
+  const handleResetStems = useCallback(() => {
+    clearStems();
+    setActiveStemView(null);
+    setPlayingStem(null);
+  }, [clearStems]);
 
   const handlePlayStem = useCallback(async (stemType) => {
     if (!stems || !stems[stemType]) return;
@@ -991,17 +932,8 @@ export function Analyze({ theme, t }) {
 
   const handleDownloadStem = useCallback(async (stemType) => {
     if (!stems || !stems[stemType]) return;
-
-    // Open the stem URL in a new tab or trigger download
-    const url = stems[stemType];
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${audioMetadata.title || 'stem'}_${stemType}.mp3`;
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, [stems, audioMetadata.title]);
+    await downloadStemFile(stemType, stemMeta);
+  }, [stems, downloadStemFile, stemMeta]);
 
   const handleSelectStem = useCallback(async (stemType) => {
     setSelectedInstrument(stemType);
@@ -1063,14 +995,7 @@ export function Analyze({ theme, t }) {
 
   // History functions
   const loadFromHistory = (item) => {
-    // For cloud items with audio/stem URLs, do a full session restore via URL param
-    if (item.isCloud && item.id && (item.audioUrl || item.stemUrls)) {
-      setSearchParams({ id: item.id });
-      loadAnalysis(item.id);
-      return;
-    }
-
-    // Fallback: restore just the analysis results (no audio/stems)
+    // Restore just the analysis results (no audio/stems) — the Vault handles full restores
     setAnalysis({
       features: item.features,
       recommendations: item.recommendations,
@@ -1189,7 +1114,7 @@ Generated by SoundSauce`;
     ].filter(Boolean).join(' | ');
 
     const lines = [
-      `Sound Analysis — ${title}`,
+      `Sound Analysis — ${title}${instrument ? ` (${instrument})` : ''}`,
       '',
       parts,
       details,
@@ -1235,7 +1160,6 @@ Generated by SoundSauce`;
                     <button
                       onClick={() => {
                         setError(null);
-                        setSearchParams({}, { replace: true });
                       }}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                         theme === 'dark'
@@ -1248,7 +1172,6 @@ Generated by SoundSauce`;
                     <button
                       onClick={() => {
                         setError(null);
-                        setSearchParams({}, { replace: true });
                         // Scroll to the upload area which is now visible after error is cleared
                         setTimeout(() => {
                           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1270,61 +1193,14 @@ Generated by SoundSauce`;
           </div>
         )}
 
-        {/* Session restore loading */}
-        {isLoadingSession && (
-          <div className={`${t.card} p-8 mb-6 flex flex-col items-center justify-center gap-3`}>
-            <Loader2 className="w-8 h-8 animate-spin" style={{ color: theme === 'dark' ? '#F59E0B' : '#D97706' }} />
-            <p className={`text-sm ${t.textMuted}`}>Restoring your analysis session...</p>
-          </div>
-        )}
-
         {/* Sound Analyzer */}
         <>
-        {/* Persistent Free Tier Usage Banner — shown to signed-in free users on every visit */}
-        {user && tier === 'free' && subscription.usage && !analysis && (
-          <div className={`flex items-center gap-3 px-4 py-3 mb-4 rounded-lg text-sm ${
-            theme === 'dark' ? 'bg-zinc-900 border border-zinc-800' : 'bg-amber-50/50 border border-amber-200/50'
-          }`}>
-            <Zap className={`w-4 h-4 flex-shrink-0 ${theme === 'dark' ? 'text-ember-500' : 'text-ember-600'}`} />
-            <span className={t.textMuted}>
-              <span className={`font-semibold ${t.text}`}>{subscription.analysesRemaining}</span> {subscription.analysesRemaining === 1 ? 'analysis' : 'analyses'} remaining this month
-            </span>
-            <Link
-              to="/pricing"
-              className={`ml-auto flex items-center gap-1 font-medium text-xs whitespace-nowrap ${
-                theme === 'dark' ? 'text-ember-500 hover:text-white' : 'text-ember-600 hover:text-ember-700'
-              }`}
-            >
-              Go unlimited
-            </Link>
-          </div>
-        )}
-
         {/* History Panel */}
         <HistoryPanel
           history={history}
           onLoad={loadFromHistory}
           onDelete={deleteFromHistory}
           onClearAll={clearHistory}
-          onTogglePublic={togglePublic}
-          onPublish={async (id, data) => {
-            // Check publish limit
-            if (!subscription.canPublish()) {
-              setUpgradePrompt({
-                isOpen: true,
-                feature: 'publishes',
-                used: subscription.usage?.publishes_count || 0,
-                limit: subscription.limits?.publishes || 3,
-              });
-              return false;
-            }
-            const success = await publishRecipe(id, data);
-            if (success && subscription.incrementPublishes) {
-              subscription.incrementPublishes();
-            }
-            return success;
-          }}
-          freeTierPublishLabel={user && tier === 'free' ? `${subscription.publishesRemaining}/${subscription.limits.publishes} free` : null}
           theme={theme}
           isOpen={historyOpen}
           onToggle={toggleHistoryOpen}
@@ -1355,10 +1231,24 @@ Generated by SoundSauce`;
               }`}>
                 <Music className="w-8 h-8 text-white" />
               </div>
-              <div className="flex-1">
-                <h3 className={`text-xl font-bold ${t.text} mb-1`}>{audioMetadata.title}</h3>
+              <div className="flex-1 min-w-0">
+                <h3 className={`text-xl font-bold ${t.text} mb-1 truncate`}>{audioMetadata.title}</h3>
                 <p className={t.textMuted}>{audioMetadata.artist}</p>
               </div>
+              {(stemMeta.bpm || stemMeta.key) && (
+                <div className={`hidden sm:flex items-center gap-2 font-mono text-sm tabular-nums ${t.textMuted}`} aria-label="Detected tempo and key">
+                  {stemMeta.bpm && (
+                    <span className={`px-2.5 py-1 rounded-md ${theme === 'dark' ? 'bg-zinc-800 text-zinc-200' : 'bg-stone-100 text-stone-800'}`}>
+                      {Math.round(stemMeta.bpm)} BPM
+                    </span>
+                  )}
+                  {stemMeta.key && (
+                    <span className={`px-2.5 py-1 rounded-md ${theme === 'dark' ? 'bg-zinc-800 text-zinc-200' : 'bg-stone-100 text-stone-800'}`}>
+                      {stemMeta.key.key} {stemMeta.key.mode === 'minor' ? 'min' : 'maj'}{stemMeta.key.camelot ? ` · ${stemMeta.key.camelot}` : ''}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Waveform Display with Loop Selection — user browses & selects region first */}
@@ -1462,12 +1352,18 @@ Generated by SoundSauce`;
                   onAnalyzeStem={handleAnalyzeStem}
                   analyzingStem={analyzingStemType}
                   analyzedStem={analysis?.analyzedStem || null}
+                  stemTypes={stemTypes}
+                  mode={separationMode}
+                  keepStatus={keepStatus}
                   onSeparate={handleSeparateStems}
                   onPlayStem={handlePlayStem}
                   onDownloadStem={handleDownloadStem}
+                  onDownloadPack={handleDownloadPack}
+                  onKeepStem={handleKeepStem}
+                  onKeepAll={handleKeepAll}
+                  onReset={handleResetStems}
                   onCancel={cancelSeparation}
                   hasAudio={!!audioFileData}
-                  freeTierLabel={user && tier === 'free' ? `${subscription.stemsRemaining}/${subscription.limits.stems} free` : null}
                   theme={theme}
                   t={t}
                 />
@@ -1507,38 +1403,6 @@ Generated by SoundSauce`;
         {/* ===== GUIDED STEP FLOW — post-analysis ===== */}
         {analysis && (
           <div className="space-y-4">
-            {/* Usage Progress Bar — free tier only */}
-            {user && tier === 'free' && subscription.usage && (
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${
-                theme === 'dark' ? 'bg-zinc-900 border border-zinc-800' : 'bg-amber-50/50 border border-amber-200/50'
-              }`}>
-                <div className="flex-1">
-                  <div className={`flex items-center justify-between mb-1.5 ${t.textMuted}`}>
-                    <span>{subscription.usage.analyses_count}/{subscription.limits.analyses} analyses used</span>
-                    <Link
-                      to="/pricing"
-                      className={`flex items-center gap-1 font-medium ${
-                        theme === 'dark' ? 'text-ember-500 hover:text-white' : 'text-ember-600 hover:text-ember-700'
-                      }`}
-                    >
-                      <Zap className="w-3.5 h-3.5" />
-                      Upgrade
-                    </Link>
-                  </div>
-                  <div className={`h-2 rounded-full overflow-hidden ${
-                    theme === 'dark' ? 'bg-zinc-800' : 'bg-amber-100'
-                  }`}>
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        theme === 'dark' ? 'bg-white' : 'bg-gradient-to-r from-ember-500 to-amber-600'
-                      }`}
-                      style={{ width: `${Math.min(100, (subscription.usage.analyses_count / subscription.limits.analyses) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Copy Button */}
             <ExportToolbar
               onCopy={copyToClipboard}
@@ -1563,52 +1427,24 @@ Generated by SoundSauce`;
               wavetableData={wavetableData}
               stems={stems}
               aiDetectionStatus={aiDetectionStatus}
-              user={user}
-              profile={profile}
+              dawPreference={prefs.dawPreference}
               reAnalyzeWithInstrument={reAnalyzeWithInstrument}
               scrollToStems={scrollToStems}
               scrollToWaveform={scrollToWaveform}
               handlePresetSelected={handlePresetSelected}
               handlePresetDownloaded={handlePresetDownloaded}
-              hasDownloadedPreset={hasDownloadedPreset}
-              trackCuratedDownload={trackCuratedDownload}
-              setAuthContext={setAuthContext}
-              setShowAuthModal={setShowAuthModal}
-              pendingPresetDownloadRef={pendingPresetDownloadRef}
-              dismissedSavePrompt={dismissedSavePrompt}
-              setDismissedSavePrompt={setDismissedSavePrompt}
             />
           </div>
         )}
         </>
 
-        {/* Upgrade Prompt Modal */}
-        <UpgradePrompt
-          isOpen={upgradePrompt.isOpen}
-          onClose={() => setUpgradePrompt(prev => ({ ...prev, isOpen: false }))}
-          feature={upgradePrompt.feature}
-          used={upgradePrompt.used}
-          limit={upgradePrompt.limit}
-          onUpgrade={(priceId) => {
-            setUpgradePrompt(prev => ({ ...prev, isOpen: false }));
-            if (subscription.startCheckout) subscription.startCheckout(priceId);
-          }}
+        {/* Lab sign-in — opened when a gated action (stem separation) is attempted while locked */}
+        <LabSignIn
+          isOpen={showSignIn}
+          onClose={() => { setShowSignIn(false); setSignInReason(null); }}
           theme={theme}
-          t={t}
+          reason={signInReason}
         />
-
-        {/* Auth Modal — triggered by guest save/download prompt */}
-        {showAuthModal && (
-          <AuthModal
-            isOpen={showAuthModal}
-            onClose={() => {
-              setShowAuthModal(false);
-              setAuthContext(null);
-            }}
-            theme={theme}
-            context={authContext}
-          />
-        )}
 
         {/* Floating Analyze CTA — appears when main AnalyzeSection scrolls out of view */}
         {audioFileData && !analysis && showFloatingAnalyze && (

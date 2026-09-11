@@ -786,6 +786,7 @@ export function useAudioProcessor() {
     formatTime,
     generateWaveform,
     generateWaveformData: worker.generateWaveformData,
-    extractWavetable: worker.extractWavetable
+    extractWavetable: worker.extractWavetable,
+    detectTempoAndKey: worker.detectTempoAndKey
   };
 }

@@ -1,213 +1,80 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { identifyUser, resetUser, trackSignIn, trackSignUp, trackSignOut } from '../lib/posthog';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { getLabToken, labSignIn, labSignOut, labVerify } from '../lib/labAuth';
 
-const AuthContext = createContext(null);
+/**
+ * Lab auth + local preferences.
+ *
+ * Replaces the old Supabase-backed AuthProvider. There is exactly one user, so
+ * "auth" is a password gate for the paid API routes, and "profile" collapses to a
+ * few preferences kept in localStorage (DAW, artist name for stem filenames).
+ */
 
-/** Fire-and-forget welcome email to new users */
-async function sendWelcomeEmail(email, username) {
-  if (!email) return;
+const PREFS_KEY = 'soundsauce_prefs';
+const DEFAULT_PREFS = {
+  dawPreference: 'Ableton Live',
+  artistName: '',
+};
+
+function readPrefs() {
   try {
-    await fetch('/api/send-feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'welcome', email, username }),
-    });
+    return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')) };
   } catch {
-    // Silent fail — welcome email is non-critical
+    return { ...DEFAULT_PREFS };
   }
 }
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+const AuthContext = createContext(null);
 
-  // Listen for auth state — only set user here, no DB calls
+export function AuthProvider({ children }) {
+  const [isSignedIn, setIsSignedIn] = useState(() => !!getLabToken());
+  const [loading, setLoading] = useState(true);
+  const [prefs, setPrefs] = useState(readPrefs);
+
+  // Validate the stored token once on mount (drops sessions the server no longer accepts)
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setUser(session?.user ?? null);
-        if (!session?.user) {
-          setProfile(null);
-          resetUser();
-        }
-        // Track auth events
-        if (event === 'SIGNED_IN' && session?.user) {
-          const method = session.user.app_metadata?.provider === 'google' ? 'google' : 'email';
-          // Detect new signups: if account was created within the last 60 seconds, it's a signup
-          const createdAt = new Date(session.user.created_at);
-          const isNewAccount = (Date.now() - createdAt.getTime()) < 60000;
-          if (isNewAccount) {
-            trackSignUp(method);
-            // Send welcome email (fire-and-forget, don't block auth flow)
-            sendWelcomeEmail(session.user.email, session.user.user_metadata?.username || session.user.user_metadata?.name);
-          }
-          trackSignIn(method);
-        }
+    let cancelled = false;
+    (async () => {
+      const ok = await labVerify();
+      if (!cancelled) {
+        setIsSignedIn(ok);
         setLoading(false);
       }
-    );
-
-    return () => subscription.unsubscribe();
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  // Fetch profile in a separate effect when user changes
-  useEffect(() => {
-    if (user) {
-      fetchProfile(user.id);
-    }
-  }, [user]);
+  const signIn = useCallback(async (password) => {
+    await labSignIn(password);
+    setIsSignedIn(true);
+  }, []);
 
-  async function fetchProfile(userId) {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+  const signOut = useCallback(() => {
+    labSignOut();
+    setIsSignedIn(false);
+  }, []);
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching profile:', error);
-      }
-      setProfile(data ?? null);
-      if (data) identifyUser({ id: userId, email: user?.email, created_at: user?.created_at }, data);
-    } catch (err) {
-      console.error('Failed to fetch profile:', err);
-      setProfile(null);
-    }
-  }
-
-  async function updateProfile(updates) {
-    if (!user) return { error: new Error('Not authenticated') };
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() })
-      .select()
-      .single();
-
-    if (!error) setProfile(data);
-    return { data, error };
-  }
-
-  async function signInWithEmail(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    return { data, error };
-  }
-
-  async function signUpWithEmail(email, password, username) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username: username || null },
-        emailRedirectTo: window.location.origin,
-      },
+  const updatePrefs = useCallback((patch) => {
+    setPrefs(prev => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
     });
+  }, []);
 
-    // Supabase returns a fake user with empty identities when email already exists
-    // (email confirmation enabled). Detect this and return a clear error.
-    if (!error && data?.user && data.user.identities?.length === 0) {
-      return {
-        data: null,
-        error: { message: 'An account with this email already exists. Try signing in instead.' },
-      };
-    }
-
-    if (!error) trackSignUp('email');
-    return { data, error };
-  }
-
-  async function signInWithGoogle() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-    return { data, error };
-  }
-
-  async function signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (!error) {
-      trackSignOut();
-      setUser(null);
-      setProfile(null);
-    }
-    return { error };
-  }
-
-  async function resetPassword(email) {
-    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/profile`,
-    });
-    return { data, error };
-  }
-
-  async function updateEmail(newEmail) {
-    const { data, error } = await supabase.auth.updateUser({ email: newEmail });
-    return { data, error };
-  }
-
-  async function updatePassword(newPassword) {
-    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
-    return { data, error };
-  }
-
-  // Subscription tier helpers — derived from profile, zero extra queries
-  const tier = profile?.subscription_tier || 'free';
-  const isSubscribed = tier !== 'free';
-  const isPro = tier === 'pro';
-
-  // Admin helper — derived from profile, zero extra queries
-  const isAdmin = profile?.is_admin === true;
-
-  // Notification count — derived from profile, zero extra queries (fast-path for sidebar badge)
-  const unreadNotifications = profile?.unread_notifications || 0;
-
-  // Message count — derived from profile, zero extra queries (fast-path for sidebar badge)
-  const unreadMessages = profile?.unread_messages || 0;
-
-  // Re-fetch profile (used after checkout to pick up webhook-updated tier)
-  function refreshProfile() {
-    if (user) fetchProfile(user.id);
-  }
-
-  const value = {
-    user,
-    profile,
+  const value = useMemo(() => ({
+    isSignedIn,
     loading,
-    // Subscription helpers
-    tier,
-    isSubscribed,
-    isPro,
-    refreshProfile,
-    // Admin
-    isAdmin,
-    // Notifications
-    unreadNotifications,
-    // Messages
-    unreadMessages,
-    // Auth methods
-    signInWithEmail,
-    signUpWithEmail,
-    signInWithGoogle,
+    signIn,
     signOut,
-    resetPassword,
-    updateProfile,
-    updateEmail,
-    updatePassword,
-  };
+    prefs,
+    updatePrefs,
+  }), [isSignedIn, loading, signIn, signOut, prefs, updatePrefs]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 }

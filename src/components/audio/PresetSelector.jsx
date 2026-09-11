@@ -1,17 +1,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Download, RotateCcw, Music, Sliders, ExternalLink, Heart, User, UserPlus, HelpCircle, ArrowLeftRight, X, Star, Volume2, Square, Loader2, Disc, Zap, Wind, Drum, Piano, Guitar as GuitarIcon, Megaphone, Music2, ChevronDown, ChevronUp, BarChart3, RefreshCw } from 'lucide-react';
+import { Download, RotateCcw, Music, Sliders, ExternalLink,  ArrowLeftRight, X, Star, Volume2, Square, Loader2, Disc, Zap, Wind, Drum, Piano, Guitar as GuitarIcon, Megaphone, Music2, ChevronDown, ChevronUp, BarChart3, RefreshCw } from 'lucide-react';
 import { CURATED_PRESETS, PRESET_CATEGORIES, TUNING_PARAMS, INSTRUMENT_TO_CATEGORY, scorePresetMatch, scorePresetsWithSpectral, computeAnalysisTuning } from '../../data/vitalPresets';
 import { SynthKnob } from '../ui/SynthKnob';
 // Lazy-loaded — only fetched when user downloads a preset
 const getPresetGenerator = () => import('../../services/vitalPresetGenerator');
-import { supabase } from '../../lib/supabase';
-import { sanitize } from '../../utils/sanitize';
-
-// Map preset category IDs to the tag labels used in community preset posts
-const CATEGORY_TO_TAG = {
-  bass: 'Bass', lead: 'Lead', pad: 'Pad', pluck: 'Pluck', kick: 'Kick',
-  drums: 'Drums', keys: 'Keys', guitar: 'Guitar', brass: 'Brass', woodwind: 'Woodwind',
-};
 
 // Icons per category for visual recognition in pills
 const CATEGORY_ICONS = {
@@ -24,7 +16,7 @@ const CATEGORY_ICONS = {
  * Shown after analysis completes on the Analyze page.
  * Uses key={detectedInstrument} from parent to reset state when instrument changes.
  */
-export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPresetSelected, onPresetDownloaded, hasDownloadedPreset, onTrackDownload, analysisFeatures, wavetableData, user, onRequestAuth, sourceAudioData, triggerDownload }) {
+export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPresetSelected, onPresetDownloaded, onTrackDownload, analysisFeatures, wavetableData, sourceAudioData }) {
   // Auto-select category based on detected instrument (key prop resets on instrument change)
   const defaultCategory = INSTRUMENT_TO_CATEGORY[detectedInstrument?.toLowerCase()] || 'lead';
   const [selectedCategory, setSelectedCategory] = useState(defaultCategory);
@@ -56,9 +48,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
   // A/B comparison state
   const [comparePresetId, setComparePresetId] = useState(null);
 
-  // Community presets state
-  const [communityPresets, setCommunityPresets] = useState([]);
-  const [communityLoading, setCommunityLoading] = useState(false);
 
   // Preset audio preview state
   const [previewingId, setPreviewingId] = useState(null);
@@ -188,42 +177,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
     };
   }, []);
 
-  // Fetch community presets when category changes
-  useEffect(() => {
-    const tagLabel = CATEGORY_TO_TAG[selectedCategory];
-    if (!tagLabel) return;
-
-    let cancelled = false;
-
-    const fetchCommunityPresets = async () => {
-      // Set loading inside async callback to satisfy lint (no sync setState in effect body)
-      await Promise.resolve();
-      if (cancelled) return;
-      setCommunityLoading(true);
-
-      const { data, error } = await supabase
-        .from('analyses')
-        .select('id, title, description, tags, vital_preset_url, like_count, download_count, profiles:user_id(username, avatar_url)')
-        .eq('is_public', true)
-        .eq('post_type', 'preset')
-        .contains('tags', [tagLabel])
-        .order('like_count', { ascending: false })
-        .limit(10);
-
-      if (cancelled) return;
-      if (error) {
-        console.warn('Failed to fetch community presets:', error.message);
-        setCommunityPresets([]);
-      } else {
-        setCommunityPresets(data || []);
-      }
-      setCommunityLoading(false);
-    };
-
-    fetchCommunityPresets();
-
-    return () => { cancelled = true; };
-  }, [selectedCategory]);
 
   // Filter presets by category, score against analysis features, sort by score descending.
   // Uses spectral fingerprint scores when available, falls back to heuristic scoring.
@@ -303,8 +256,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
     setSelectedPresetId(presetId);
     setTuningOverrides(newTuning);
     setShowSliders(true);
-    setShowDuplicateWarning(false);
-    if (duplicateTimerRef.current) clearTimeout(duplicateTimerRef.current);
     setComparePresetId(null); // Clear comparison when selecting a preset normally
     stopPreview(); // Stop any playing preview
     onPresetSelected?.(presetId, newTuning);
@@ -339,31 +290,12 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
     onTrackDownload?.(selectedPresetId, selectedPreset?.name || selectedPresetId);
     onPresetSelected?.(selectedPresetId, tuningOverrides);
     onPresetDownloaded?.();
-    setShowDuplicateWarning(false);
-    if (duplicateTimerRef.current) clearTimeout(duplicateTimerRef.current);
   };
 
   const handleDownload = () => {
     if (!selectedPresetId) return;
-
-    // Gate preset downloads behind auth — require free account
-    if (!user) {
-      onRequestAuth?.(selectedPreset?.name);
-      return;
-    }
-
     executeDownload();
   };
-
-  // Auto-download after auth — when a guest tried to download, signed up, and came back
-  const prevUserRef = useRef(user);
-  useEffect(() => {
-    if (user && !prevUserRef.current && triggerDownload?.current && selectedPresetId) {
-      triggerDownload.current = false;
-      executeDownload();
-    }
-    prevUserRef.current = user;
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle selecting preset B from the comparison panel
   const handleSelectComparePreset = () => {
@@ -372,8 +304,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
     setComparePresetId(null);
     setTuningOverrides({});
     setShowSliders(true);
-    setShowDuplicateWarning(false);
-    if (duplicateTimerRef.current) clearTimeout(duplicateTimerRef.current);
     onPresetSelected?.(comparePresetId, {});
   };
 
@@ -566,9 +496,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
         {
           fundamentalHz,
           keyNote,
-          onProgress: (p) => {
-            // Could update UI with sweep progress if desired
-          },
         }
       );
 
@@ -927,11 +854,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
           </div>
           {selectedPresetId && (
             <div className="flex items-center gap-2">
-              {!user && (
-                <span className={`text-xs ${isDark ? 'text-zinc-500' : 'text-stone-400'}`}>
-                  Free account required
-                </span>
-              )}
               <button
                 onClick={handleDownload}
                 className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-all whitespace-nowrap ${
@@ -940,19 +862,9 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
                     : 'bg-ember-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
                 }`}
               >
-                {!user ? (
-                  <>
-                    <UserPlus className="w-4 h-4" />
-                    <span className="hidden sm:inline">Sign up to download</span>
-                    <span className="sm:hidden">Sign up</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    <span className="hidden sm:inline">Download .vital</span>
-                    <span className="sm:hidden">.vital</span>
-                  </>
-                )}
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">Download .vital</span>
+                <span className="sm:hidden">.vital</span>
               </button>
             </div>
           )}
@@ -1296,104 +1208,6 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
         </div>
       )}
 
-      {/* Community Presets */}
-      {(communityPresets.length > 0 || communityLoading) && (
-        <div className={`border-t ${isDark ? 'border-zinc-700' : 'border-stone-200'}`}>
-          <div className="px-4 py-3 flex items-center gap-2">
-            <User className={`w-4 h-4 ${isDark ? 'text-ember-500' : 'text-ember-600'}`} />
-            <span className={`text-sm font-medium ${t.text}`}>Community Presets</span>
-            {!communityLoading && (
-              <span className={`text-xs ${t.textMuted}`}>({communityPresets.length})</span>
-            )}
-          </div>
-
-          {communityLoading ? (
-            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[1, 2].map(i => (
-                <div
-                  key={i}
-                  className={`h-20 rounded-lg animate-pulse ${isDark ? 'bg-zinc-800' : 'bg-stone-100'}`}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {communityPresets.map(preset => (
-                <div
-                  key={preset.id}
-                  className={`p-3 rounded-lg border ${
-                    isDark
-                      ? 'border-zinc-700 bg-zinc-950'
-                      : 'border-stone-200 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className={`font-semibold text-sm truncate ${t.text}`}>
-                        {sanitize(preset.title || 'Untitled')}
-                      </div>
-                      {preset.profiles && (
-                        <div className={`flex items-center gap-1.5 mt-0.5 ${t.textMuted}`}>
-                          {preset.profiles.avatar_url ? (
-                            <img
-                              src={preset.profiles.avatar_url}
-                              alt=""
-                              className="w-4 h-4 rounded-full object-cover"
-                            />
-                          ) : (
-                            <User className="w-3.5 h-3.5" />
-                          )}
-                          <span className="text-xs truncate">{sanitize(preset.profiles.username || 'Anonymous')}</span>
-                        </div>
-                      )}
-                    </div>
-                    {preset.vital_preset_url && (
-                      <button
-                        onClick={async () => {
-                          const { downloadRemotePreset, buildPresetFilename } = await getPresetGenerator();
-                          const communityAuthor = preset.profiles?.username || 'SoundSauce';
-                          const filename = buildPresetFilename({ presetName: sanitize(preset.title) });
-                          downloadRemotePreset(preset.vital_preset_url, filename, {
-                            preset_name: sanitize(preset.title) || 'Community Preset',
-                            author: communityAuthor,
-                            comments: `${sanitize(preset.title) || 'Untitled'} by ${communityAuthor}. Downloaded from SoundSauce (soundsauce.app).`,
-                          });
-                        }}
-                        className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-all ${
-                          isDark
-                            ? 'bg-zinc-700 text-white hover:bg-zinc-600'
-                            : 'bg-ember-600 text-white hover:opacity-90'
-                        }`}
-                      >
-                        <Download className="w-3 h-3" />
-                        .vital
-                      </button>
-                    )}
-                  </div>
-                  {preset.description && (
-                    <div className={`text-xs mt-1.5 line-clamp-2 ${t.textMuted}`}>
-                      {sanitize(preset.description)}
-                    </div>
-                  )}
-                  <div className={`flex items-center gap-3 mt-2 text-[10px] ${t.textMuted}`}>
-                    {(preset.like_count || 0) > 0 && (
-                      <span className="flex items-center gap-0.5">
-                        <Heart className="w-3 h-3" /> {preset.like_count}
-                      </span>
-                    )}
-                    {(preset.download_count || 0) > 0 && (
-                      <span className="flex items-center gap-0.5">
-                        <Download className="w-3 h-3" /> {preset.download_count}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Tuning Knobs */}
       {selectedPresetId && (
         <div className={`border-t ${isDark ? 'border-zinc-700' : 'border-stone-200'}`}>
@@ -1516,17 +1330,8 @@ export function PresetSelector({ detectedInstrument, audioTitle, theme, t, onPre
                     : 'bg-ember-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
                 }`}
               >
-                {!user ? (
-                  <>
-                    <UserPlus className="w-4 h-4" />
-                    Sign up to download
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    Download .vital
-                  </>
-                )}
+                <Download className="w-4 h-4" />
+                Download .vital
               </button>
             </div>
           </div>
