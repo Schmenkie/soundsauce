@@ -23,6 +23,7 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 | Framework | React 19 + Vite 7 |
 | Styling | Tailwind CSS 4 (custom theme in `src/index.css` `@theme` — **not** `tailwind.config.js`) |
 | Audio | Web Audio API + Web Worker DSP (`src/workers/audio.worker.js`) |
+| Track import | **Local helper** (`helper/remix-helper.mjs`, yt-dlp + ffmpeg on the Mac, `localhost:7331`) — paste a YouTube/SoundCloud link or search by name → FLAC + metadata |
 | Stem separation | Demucs on Replicate (`cjwbw/demucs`, models `htdemucs_ft` / `htdemucs` / `htdemucs_6s`), FLAC output |
 | Storage | Vercel Blob (source uploads + kept stems). ~1 GB on Hobby |
 | Auth | Single lab password → HMAC session token (`api/_auth.js`). No Supabase, no accounts |
@@ -49,11 +50,15 @@ audio-analyzer-pro/
 │   ├── separate-stems.js        # Start Demucs prediction: mode vocals|stems4|stems6, quality best|fast, FLAC
 │   ├── check-stems.js           # Poll prediction; returns whatever stem keys the mode produced
 │   └── instrument.js            # Gemini zero-shot instrument labels; deletes its Blob upload after reading it
+├── helper/
+│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files
+│   └── install-launchagent.sh   # Installs the helper as a macOS LaunchAgent (npm run helper:install)
 ├── scripts/
 │   └── dev-api.mjs              # Local runner for api/*.js on :3001 (Vite proxies /api there)
 ├── e2e/smoke.spec.js            # Playwright smoke tests (lab loads, /analyze redirect, settings, sign-in dialog)
 ├── src/
 │   ├── lib/
+│   │   ├── helper.js            # Client for the local helper (health, resolve, jobs, file URLs, clipboard URL sniffing)
 │   │   ├── labAuth.js           # getLabToken, labAuthHeaders, labSignIn, labVerify, labSignOut (localStorage)
 │   │   ├── posthog.js           # PostHog init + tracking helpers (many are legacy no-ops now)
 │   │   ├── sentry.js            # Optional error monitoring
@@ -63,8 +68,8 @@ audio-analyzer-pro/
 │   │   ├── auth/LabSignIn.jsx   # Password modal (focus trap, dock auto-hide)
 │   │   ├── layout/Dock.jsx      # Vertical dock: Lab, Settings, theme, lock/unlock
 │   │   ├── layout/PageLayout.jsx
-│   │   ├── audio/               # AudioUploadSection, WaveformVisualizer, PlaybackControls, SpectrumAnalyzer,
-│   │   │                        # AnalyzeSection, InstrumentSelector, StemSelector, PresetSelector
+│   │   ├── audio/               # LinkImport (paste link / search), AudioUploadSection, WaveformVisualizer, PlaybackControls,
+│   │   │                        # SpectrumAnalyzer, AnalyzeSection, InstrumentSelector, StemSelector, PresetSelector
 │   │   ├── analysis/            # AnalysisStepFlow, StepFlow, Step, ADSREnvelope, ResultsTabs, SoundRecipe (SoundSauce + VitalGuide)
 │   │   ├── comparison/ExportToolbar.jsx
 │   │   ├── history/HistoryPanel.jsx   # Recent analyses (localStorage) — interim until the Vault lands
@@ -73,6 +78,7 @@ audio-analyzer-pro/
 │   │   ├── useAudioProcessor.js # Web Audio playback + analysis orchestration (+ detectTempoAndKey proxy)
 │   │   ├── useAudioWorker.js    # Worker RPC (analyzeAudio, detectInstruments, detectTempoAndKey, spectral match, …)
 │   │   ├── useStemSeparation.js # Separation workflow, keep-to-Blob, stamped downloads, Remix Pack zip
+│   │   ├── useHelper.js         # Helper availability (15s poll + focus), resolve(query), grab(url) with job progress
 │   │   ├── useHistory.js        # localStorage recent analyses
 │   │   ├── useTheme.js, usePageTitle.js, useFocusTrap.js
 │   ├── pages/
@@ -102,6 +108,17 @@ There is one user. Auth exists only to gate spend (Replicate GPU, Blob uploads, 
 - Frontend stores the token in `localStorage['soundsauce_lab_session']`; `labAuthHeaders()` is spread into fetch headers. `AuthProvider` verifies it once on mount via `GET /api/auth`.
 - `signPredictionId(id)` binds Replicate prediction IDs so `check-stems` can't be enumerated (replaces the old per-user HMAC).
 - UI: lock icon in the Dock and an "Unlock" button in Settings open `LabSignIn`. Attempting separation while locked opens it with a reason.
+
+### Track import via the local helper
+
+yt-dlp cannot run on Vercel (Python + ffmpeg, and YouTube blocks datacenter IPs), so link import is a **companion process on the Mac**: `helper/remix-helper.mjs`, started with `npm run helper` (also part of `npm run dev:full`) or installed as a login item with `npm run helper:install`. Prereqs: `brew install yt-dlp ffmpeg`.
+
+- Browsers exempt `http://localhost` from mixed-content blocking, so the deployed HTTPS site can call it. CORS is restricted to the Lab origins; the helper answers Chrome's Private Network Access preflight (`Access-Control-Allow-Private-Network: true`). `vercel.json` CSP allows `http://localhost:7331` in `connect-src`/`img-src`.
+- `POST /resolve {query}` — URL → single track (or playlist entries); free text → `ytsearch5` + `scsearch5` interleaved. yt-dlp's SoundCloud extractor covers SoundCloud, no cobalt needed.
+- `POST /jobs {url}` → `yt-dlp -f bestaudio -x --audio-format flac --embed-metadata --write-info-json --write-thumbnail`; `GET /jobs/:id` reports `phase` (downloading/converting/finishing) + progress parsed from `--newline` output; `GET /files/:id` streams the FLAC, `/files/:id/thumb` the cover.
+- Metadata: `splitArtistTitle()` prefers yt-dlp's `artist`/`track`, else splits "Artist - Title", else uses the uploader; strips "(Official Video)" noise. Files are also copied to `~/Music/Remix Lab/Sources/<Artist - Title>.flac` for Live's browser.
+- Frontend: `useHelper()` polls `/health`; `LinkImport` shows a setup card when offline, otherwise a paste/search box with clipboard-link suggestion, results list, and a progress bar. `Analyze.handleImported()` loads the FLAC exactly like an upload and sets `audioMetadata` (artist, title, thumbnailUrl, sourceUrl) — the header shows the artwork and stem filenames get the real artist.
+- Keep yt-dlp current (`brew upgrade yt-dlp`) — YouTube breaks old versions every few months; the helper's `/health` reports the version.
 
 ### Preferences (was "profile")
 
@@ -345,7 +362,9 @@ className="bg-amber-50 text-amber-700 rounded-lg"
 ```bash
 npm run dev          # Vite only (no /api) — fine for UI work
 npm run dev:api      # Serverless functions on :3001 (loads .env.local + .env.local.vercel)
-npm run dev:full     # Both, with Vite proxying /api → :3001 (Browser-pane config: "full")
+npm run dev:full     # Vite + API + helper together (Browser-pane config: "full")
+npm run helper       # Local yt-dlp companion only (localhost:7331)
+npm run helper:install  # Install the helper as a macOS LaunchAgent (starts at login)
 npm run build        # Production build to /dist (frontend only)
 npm run lint         # ESLint
 npm run test:run     # Vitest once (51 tests: DSP algorithms, curated presets, a11y)
@@ -384,6 +403,8 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 |---|-------|--------|-------|
 | 1 | **Vocal Grab** | ✅ Done | Modes, FLAC, Keep-to-Blob, stamped filenames, Remix Pack zip, quick BPM/key chip |
 | 2 | **Strip the site + drop Supabase** | ✅ Done | 160 files deleted; lab password auth; localStorage prefs |
+| 2b | **Link import (local helper)** | ✅ Done | yt-dlp companion; paste a YouTube/SoundCloud link or search by name; FLAC + artist/title/artwork |
+| 2c | **Creative UI pass** | Next | Colorful, interactive, creative (explicitly *not* Ableton-themed). Mock drafts first, then implement |
 | 3 | **Acapella Vault** (`/vault`, `/vault/:id`) | Next | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
 | 4 | **Remix Calculator** (`/calc`) | Planned | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
 | 5 | **Stem Player + Arrangement Map** | Planned | Synced mute/solo of all stems; stacked stem waveforms with a bar grid from BPM (stem waveform data is already cached per stem in Analyze) |
@@ -401,6 +422,11 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Link import via local helper** (Sep 2026)
+  - `helper/remix-helper.mjs`: Node server wrapping yt-dlp + ffmpeg on localhost:7331 with CORS + PNA headers; `/resolve` handles URLs, playlists and free-text search across YouTube and SoundCloud; `/jobs` downloads to FLAC with embedded metadata, cover art and `info.json`, reports phase/progress, copies the result to `~/Music/Remix Lab/Sources/`. `helper/install-launchagent.sh` for a login item.
+  - Frontend: `src/lib/helper.js`, `useHelper` hook, `LinkImport` component (offline setup card, paste/search, clipboard suggestion, results with artwork + platform badge, progress). `Analyze.handleImported()` + shared `resetForNewAudio()`; header shows artwork; `audioMetadata` gains `thumbnailUrl`/`sourceUrl`/`source`.
+  - `npm run helper`, `npm run helper:install`; `dev:full` now runs Vite + API + helper. CSP allows localhost:7331. Lucide v1 has no brand icons — platform badges are text pills.
+  - Verified locally: `ytsearch`/`scsearch` both resolve "Tell Me What You Want" (YouTube extended mix 4:18, SoundCloud original 2:40). yt-dlp upgraded 2026.03.17 → 2026.08.19 via Homebrew (old version warned >90 days).
 - [x] **Remix Lab pivot — Phases 1 & 2** (Sep 2026)
   - **Checkpoint**: full social platform committed as `c28e4f0` before any deletion. A hardcoded PostHog personal API key found in `scripts/daily-posthog-report.mjs` was moved to `.env.local` first so it never entered git.
   - **Vocal Grab** (`api/separate-stems.js`, `api/check-stems.js`, `useStemSeparation.js`, `StemSelector.jsx`, `utils/stemFiles.js`): separation modes `vocals` / `stems4` / `stems6` with a `best`/`fast` quality toggle, FLAC output, dynamic stem keys (two-stem returns `{ vocals, other }` — verified against the predictor source at `github.com/chenxwh/demucs`), Keep-to-Blob re-hosting (auto in vocals mode), BPM/key-stamped filenames, Remix Pack zip with `notes.txt` (Camelot, compatible keys, Ableton warp tips), 10-minute safety timeout. Measured: `htdemucs_ft` on a 2:40 track = 34 s predict time on Replicate.

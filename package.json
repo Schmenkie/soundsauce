@@ -14,7 +14,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "dev:api": "node scripts/dev-api.mjs",
-    "dev:full": "concurrently -n vite,api -c cyan,yellow \"vite --port 5173\" \"node scripts/dev-api.mjs\""
+    "dev:full": "concurrently -n vite,api,helper -c cyan,yellow,magenta \"vite --port 5173\" \"node scripts/dev-api.mjs\" \"node helper/remix-helper.mjs\"",
+    "helper": "node helper/remix-helper.mjs",
+    "helper:install": "bash helper/install-launchagent.sh"
   },
   "dependencies": {
     "@sentry/react": "^10.38.0",

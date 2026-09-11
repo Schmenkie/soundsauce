@@ -6,3 +6,4 @@ export { InstrumentSelector } from './InstrumentSelector';
 export { AnalyzeSection } from './AnalyzeSection';
 export { StemSelector } from './StemSelector';
 export { PresetSelector } from './PresetSelector';
+export { LinkImport } from './LinkImport';
