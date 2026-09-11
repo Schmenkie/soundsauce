@@ -27,11 +27,12 @@ function getCurrentPeriod() {
  *
  * Usage is tracked per-month in the usage_tracking table (YYYY-MM period).
  *
- * @returns {{ tier: string, limits: object, loading: boolean, usage: object|null, totalAnalyses: number, canAnalyze: function, canSeparateStems: function, canPublish: function, canSaveAnalysis: function, canCreateChallenge: function, analysesRemaining: number, stemsRemaining: number, publishesRemaining: number, storageRemaining: number, incrementAnalyses: function, incrementStems: function, incrementPublishes: function, startCheckout: function, openBillingPortal: function }}
+ * @returns {{ tier: string, limits: object, loading: boolean, usage: object|null, usageError: string|null, totalAnalyses: number, canAnalyze: function, canSeparateStems: function, canPublish: function, canSaveAnalysis: function, canCreateChallenge: function, analysesRemaining: number, stemsRemaining: number, publishesRemaining: number, storageRemaining: number, incrementAnalyses: function, incrementStems: function, incrementPublishes: function, startCheckout: function, openBillingPortal: function }}
  */
 export function useSubscription() {
   const { user, tier } = useAuth();
   const [usage, setUsage] = useState(null);
+  const [usageError, setUsageError] = useState(null);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
   const [loading, setLoading] = useState(true);
   const usageRef = useRef(usage);
@@ -54,23 +55,39 @@ export function useSubscription() {
 
     async function fetchUsage() {
       setLoading(true);
+      setUsageError(null);
       const period = getCurrentPeriod();
 
       // Fetch current month usage
-      const { data: usageData } = await supabase
+      const { data: usageData, error: usageQueryError } = await supabase
         .from('usage_tracking')
         .select('analyses_count, stems_count, publishes_count')
         .eq('user_id', user.id)
         .eq('period', period)
         .single();
 
+      if (usageQueryError && usageQueryError.code !== 'PGRST116') {
+        // PGRST116 = no rows found (expected for new period), all other errors are real failures
+        console.error('Failed to fetch usage data:', usageQueryError);
+        setUsageError(usageQueryError.message || 'Failed to load usage data');
+        setLoading(false);
+        return;
+      }
+
       setUsage(usageData || { analyses_count: 0, stems_count: 0, publishes_count: 0 });
 
       // Fetch total analyses count for storage limit
-      const { count } = await supabase
+      const { count, error: countError } = await supabase
         .from('analyses')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
+
+      if (countError) {
+        console.error('Failed to fetch analyses count:', countError);
+        setUsageError(countError.message || 'Failed to load usage data');
+        setLoading(false);
+        return;
+      }
 
       setTotalAnalyses(count || 0);
       setLoading(false);
@@ -88,8 +105,9 @@ export function useSubscription() {
   const canAnalyze = useCallback(() => {
     if (!user) return true; // Guests have no limits (localStorage only)
     if (limits.analyses === Infinity) return true;
+    if (usageError) return false; // Fail closed — don't bypass limits on fetch failure
     return (usageRef.current?.analyses_count || 0) < limits.analyses;
-  }, [user, limits]);
+  }, [user, limits, usageError]);
 
   /**
    * Check if user can run another stem separation this month.
@@ -98,8 +116,9 @@ export function useSubscription() {
   const canSeparateStems = useCallback(() => {
     if (!user) return false; // Guests can't use stems (needs account)
     if (limits.stems === Infinity) return true;
+    if (usageError) return false; // Fail closed
     return (usageRef.current?.stems_count || 0) < limits.stems;
-  }, [user, limits]);
+  }, [user, limits, usageError]);
 
   /**
    * Check if user can publish another Sound Sauce this month.
@@ -108,8 +127,9 @@ export function useSubscription() {
   const canPublish = useCallback(() => {
     if (!user) return false;
     if (limits.publishes === Infinity) return true;
+    if (usageError) return false; // Fail closed
     return (usageRef.current?.publishes_count || 0) < limits.publishes;
-  }, [user, limits]);
+  }, [user, limits, usageError]);
 
   /**
    * Check if user can save another analysis (storage limit).
@@ -169,13 +189,23 @@ export function useSubscription() {
       .single();
 
     if (existing) {
-      const updates = { [field]: (existing[field] || 0) + 1 };
+      // Re-read after write rather than computing client-side, so concurrent
+      // increments from multiple tabs converge on the true DB value.
       await supabase
         .from('usage_tracking')
-        .update(updates)
+        .update({ [field]: (existing[field] || 0) + 1 })
         .eq('id', existing.id);
 
-      setUsage(prev => prev ? { ...prev, ...updates } : { analyses_count: 0, stems_count: 0, publishes_count: 0, ...updates });
+      // Fetch the committed row so local state reflects the actual DB value
+      const { data: refreshed } = await supabase
+        .from('usage_tracking')
+        .select('analyses_count, stems_count, publishes_count')
+        .eq('id', existing.id)
+        .single();
+
+      if (refreshed) {
+        setUsage(refreshed);
+      }
     } else {
       const newRow = {
         user_id: user.id,
@@ -184,11 +214,13 @@ export function useSubscription() {
         stems_count: field === 'stems_count' ? 1 : 0,
         publishes_count: field === 'publishes_count' ? 1 : 0,
       };
-      await supabase
+      const { data: inserted } = await supabase
         .from('usage_tracking')
-        .insert(newRow);
+        .insert(newRow)
+        .select('analyses_count, stems_count, publishes_count')
+        .single();
 
-      setUsage(newRow);
+      setUsage(inserted || newRow);
     }
   }, [user]);
 
@@ -265,6 +297,7 @@ export function useSubscription() {
 
     // Usage data
     usage,
+    usageError,
     totalAnalyses,
 
     // Limit checks

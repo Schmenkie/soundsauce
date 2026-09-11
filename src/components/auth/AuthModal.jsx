@@ -8,7 +8,7 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
  * Auth modal - sign in, sign up, forgot password
  * Matches the app's theme-aware design system
  */
-export function AuthModal({ isOpen, onClose, theme }) {
+export function AuthModal({ isOpen, onClose, theme, context }) {
   const [mode, setMode] = useState('signin'); // signin | signup | forgot
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +16,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [socialProof, setSocialProof] = useState(null);
   const { signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword } = useAuth();
 
   const resetForm = () => {
@@ -76,6 +77,21 @@ export function AuthModal({ isOpen, onClose, theme }) {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
+  // Fetch social proof stats for signup mode
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch('/api/public-stats')
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!cancelled && data && data.totalAnalyses > 0) {
+          setSocialProof(data.totalAnalyses);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
   const isDark = theme === 'dark';
 
   return (
@@ -105,35 +121,51 @@ export function AuthModal({ isOpen, onClose, theme }) {
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className={`flex items-center justify-between p-6 border-b ${
+          <div className={`p-6 border-b ${
             isDark ? 'border-zinc-700' : 'border-stone-200'
           }`}>
-            <h2 id="auth-modal-title" className={`text-xl font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>
-              {mode === 'signin' && 'Sign In'}
-              {mode === 'signup' && 'Create Account'}
-              {mode === 'forgot' && 'Reset Password'}
-            </h2>
-            <button
-              onClick={onClose}
-              className={`p-1.5 rounded-md transition-colors ${isDark ? 'text-zinc-400 hover:text-white hover:bg-zinc-800' : 'text-stone-500 hover:text-black hover:bg-stone-100'}`}
-              aria-label="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center justify-between">
+              <h2 id="auth-modal-title" className={`text-xl font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>
+                {mode === 'signin' && 'Sign In'}
+                {mode === 'signup' && 'Create Account'}
+                {mode === 'forgot' && 'Reset Password'}
+              </h2>
+              <button
+                onClick={onClose}
+                className={`p-1.5 rounded-md transition-colors ${isDark ? 'text-zinc-400 hover:text-white hover:bg-zinc-800' : 'text-stone-500 hover:text-black hover:bg-stone-100'}`}
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {mode === 'signup' && context && (
+              <p className={`mt-1.5 text-sm ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>
+                {context.action === 'download' && context.detail
+                  ? `Create a free account to download your ${context.detail} preset`
+                  : context.action === 'download'
+                  ? 'Create a free account to download presets'
+                  : context.action === 'save'
+                  ? 'Create a free account to save your analysis'
+                  : null}
+              </p>
+            )}
           </div>
 
           {/* Body */}
           <div className="p-6">
-            {/* Google OAuth */}
+            {/* Social proof — signup mode only */}
+            {mode === 'signup' && socialProof && (
+              <p className={`text-center text-sm mb-5 ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>
+                {socialProof.toLocaleString()} sounds analyzed by producers worldwide
+              </p>
+            )}
+
+            {/* Google OAuth — primary option */}
             {mode !== 'forgot' && (
               <>
                 <button
                   onClick={handleGoogleSignIn}
-                  className={`w-full py-3 px-4 font-medium flex items-center justify-center gap-3 border rounded-md transition-colors ${
-                    isDark
-                      ? 'bg-zinc-950 border-zinc-700 text-white hover:bg-zinc-700'
-                      : 'bg-stone-50 border-stone-200 text-stone-900 hover:bg-stone-100'
-                  }`}
+                  className="w-full py-3.5 px-4 font-medium flex items-center justify-center gap-3 rounded-md transition-all bg-white text-stone-900 hover:bg-stone-100 border border-stone-300 shadow-sm hover:shadow"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
@@ -147,7 +179,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
                 {/* Divider */}
                 <div className="flex items-center gap-4 my-6">
                   <div className={`flex-1 h-px ${isDark ? 'bg-zinc-700' : 'bg-stone-200'}`} />
-                  <span className={`text-sm ${isDark ? 'text-zinc-500' : 'text-stone-400'}`}>or</span>
+                  <span className={`text-xs ${isDark ? 'text-zinc-500' : 'text-stone-400'}`}>or continue with email</span>
                   <div className={`flex-1 h-px ${isDark ? 'bg-zinc-700' : 'bg-stone-200'}`} />
                 </div>
               </>
@@ -234,6 +266,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
                   {error}
                   {error.includes('already exists') && (
                     <button
+                      type="button"
                       onClick={() => switchMode('signin')}
                       className={`block mt-2 font-medium hover:underline ${isDark ? 'text-white' : 'text-ember-600'}`}
                     >
@@ -274,6 +307,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
               {mode === 'signin' && (
                 <>
                   <button
+                    type="button"
                     onClick={() => switchMode('forgot')}
                     className={`hover:underline ${isDark ? 'text-zinc-400' : 'text-ember-600'}`}
                   >
@@ -282,6 +316,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
                   <div>
                     Don't have an account?{' '}
                     <button
+                      type="button"
                       onClick={() => switchMode('signup')}
                       className={`font-medium hover:underline ${isDark ? 'text-white' : 'text-ember-600'}`}
                     >
@@ -294,6 +329,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
                 <div>
                   Already have an account?{' '}
                   <button
+                    type="button"
                     onClick={() => switchMode('signin')}
                     className={`font-medium hover:underline ${isDark ? 'text-white' : 'text-ember-600'}`}
                   >
@@ -303,6 +339,7 @@ export function AuthModal({ isOpen, onClose, theme }) {
               )}
               {mode === 'forgot' && (
                 <button
+                  type="button"
                   onClick={() => switchMode('signin')}
                   className={`font-medium hover:underline ${isDark ? 'text-white' : 'text-ember-600'}`}
                 >

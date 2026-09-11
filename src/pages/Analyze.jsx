@@ -7,15 +7,14 @@ import { supabase } from '../lib/supabase';
 import { upload } from '@vercel/blob/client';
 
 // Components
-import { Tooltip, UpgradePrompt } from '../components/ui';
+import { UpgradePrompt } from '../components/ui';
 import { useToast } from '../components/ui/Toast';
 import { AuthModal } from '../components/auth';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { HistoryPanel } from '../components/history';
 import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, InstrumentSelector, AnalyzeSection, StemSelector, PresetSelector } from '../components/audio';
-import { Music, Zap, UserPlus, Scissors, Sparkles, Loader2, ArrowLeft, Sliders, Settings, Compass, Download, ArrowRight, ChevronDown, ChevronUp, Upload } from 'lucide-react';
-import { ADSREnvelope, ResultsTabs, SoundSauce, VitalGuide, QuickCompare } from '../components/analysis';
-import { getDAWRecipe } from '../data/dawPlugins';
+import { Music, Zap, UserPlus, Scissors, Sparkles, Loader2, ArrowLeft, BarChart3, AlertTriangle, UploadCloud } from 'lucide-react';
+import { AnalysisStepFlow } from '../components/analysis';
 import { ExportToolbar } from '../components/comparison';
 
 // Utils
@@ -58,71 +57,6 @@ const STEM_LABELS = {
   vocals: ['vocal', 'synth pad', 'synth lead', 'strings', 'brass', 'woodwind'],
   other: null, // Use default labels
 };
-
-/**
- * Collapsible accordion for DAW-specific settings (Synthesis Type, VSTs, EQ, Effects).
- * Oscillator/Filter/Envelope/Modulation are intentionally omitted — VitalGuide covers those.
- */
-function DAWSettingsAccordion({ analysis, theme, t }) {
-  const [openSections, setOpenSections] = useState({});
-  const isDark = theme === 'dark';
-
-  if (!analysis?.recommendations) return null;
-
-  const { synthType, vstSuggestions, nativeInstruments, eqSettings, effects } = analysis.recommendations;
-
-  const toggle = (key) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
-
-  const sections = [
-    { key: 'synth', label: 'Synthesis Type', items: synthType },
-    { key: 'vst', label: 'Recommended VSTs & DAW Instruments', items: [...(vstSuggestions || []), ...(nativeInstruments || [])] },
-    { key: 'eq', label: 'EQ Settings', items: eqSettings },
-    { key: 'fx', label: 'Effects Chain', items: effects },
-  ].filter(s => s.items?.length > 0);
-
-  if (sections.length === 0) return null;
-
-  return (
-    <div className="mt-6 space-y-2">
-      <h3 className={`text-sm font-semibold uppercase tracking-wider mb-3 ${t.textDimmed}`}>
-        Detailed Settings
-      </h3>
-      {sections.map(({ key, label, items }) => {
-        const isOpen = !!openSections[key];
-        return (
-          <div key={key} className={`border rounded-lg overflow-hidden ${isDark ? 'border-zinc-800' : 'border-stone-200'}`}>
-            <button
-              onClick={() => toggle(key)}
-              className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm font-medium transition-colors ${
-                isDark
-                  ? 'hover:bg-white/[0.03] text-zinc-200'
-                  : 'hover:bg-stone-50 text-stone-700'
-              }`}
-            >
-              {label}
-              {isOpen
-                ? <ChevronUp className={`w-4 h-4 ${t.textDimmed}`} />
-                : <ChevronDown className={`w-4 h-4 ${t.textDimmed}`} />
-              }
-            </button>
-            {isOpen && (
-              <div className={`px-4 pb-4 ${isDark ? 'bg-zinc-900/50' : 'bg-stone-50/50'}`}>
-                <ul className="space-y-1.5">
-                  {items.map((item, i) => (
-                    <li key={i} className={`text-sm flex items-start gap-2 ${t.textMuted}`}>
-                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDark ? 'bg-ember-500/60' : 'bg-ember-600/60'}`} />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 /**
  * Analyze page - The main audio analyzer tool
@@ -170,6 +104,7 @@ export function Analyze({ theme, t }) {
   const { hasDownloadedPreset, trackCuratedDownload } = useDownloadedPresets();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [wavetableData, setWavetableData] = useState(null);
   const [detectedInstruments, setDetectedInstruments] = useState(null);
   const [error, setError] = useState(null);
   const [selectedInstrument, setSelectedInstrument] = useState('full');
@@ -184,13 +119,21 @@ export function Analyze({ theme, t }) {
   // Upgrade prompt state
   const [upgradePrompt, setUpgradePrompt] = useState({ isOpen: false, feature: null, used: 0, limit: 0 });
   const [dismissedSavePrompt, setDismissedSavePrompt] = useState(false);
+
+  // Step flow state — guided post-analysis experience
+  const [expandedSteps, setExpandedSteps] = useState(new Set([1])); // Step 1 auto-expanded
+  const [completedSteps, setCompletedSteps] = useState(new Set());
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authContext, setAuthContext] = useState(null);
+  const pendingPresetDownloadRef = useRef(false);
 
   // Refs
   const dropZoneRef = useRef(null);
   const stemSectionRef = useRef(null);
   const waveformSectionRef = useRef(null);
   const resultsSectionRef = useRef(null);
+  const analyzeSectionRef = useRef(null);
+  const [showFloatingAnalyze, setShowFloatingAnalyze] = useState(false);
 
   // AI detection state (Gemini-powered, runs after heuristic analysis)
   const [aiDetectionStatus, setAIDetectionStatus] = useState('idle'); // idle | uploading | detecting | done | error
@@ -339,19 +282,49 @@ export function Analyze({ theme, t }) {
     }
   }, [analysis, user, tier, subscription.usage, subscription.limits, dismissedSavePrompt]);
 
+  // IntersectionObserver: show floating Analyze button when AnalyzeSection scrolls out of view
+  useEffect(() => {
+    const el = analyzeSectionRef.current;
+    if (!el) {
+      setShowFloatingAnalyze(false);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowFloatingAnalyze(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [audioFileData, analysis]);
+
   // Handlers that wrap audio processor methods (declared before useEffect that uses them)
   const handleTogglePlayback = useCallback(async () => {
-    // Clear stem playback state when user uses main play button
-    if (playingStem) {
+    // Play the active stem if one is being viewed, otherwise play full mix
+    const activeStem = activeStemViewRef.current;
+    let audioToPlay = audioFileData;
+
+    if (activeStem) {
+      // Use cached stem audio if available, otherwise download it
+      if (stemAudioData[activeStem]) {
+        audioToPlay = stemAudioData[activeStem];
+      } else {
+        const downloaded = await getStemAudio(activeStem);
+        if (downloaded) {
+          audioToPlay = downloaded;
+        }
+      }
+      setPlayingStem(activeStem);
+    } else if (playingStem) {
       setPlayingStem(null);
     }
-    const result = await audio.togglePlayback(audioFileData);
+
+    const result = await audio.togglePlayback(audioToPlay);
     if (result.error) {
       setError(result.error);
     } else {
       setError(null);
     }
-  }, [audio.togglePlayback, audioFileData, playingStem]);
+  }, [audio.togglePlayback, audioFileData, stemAudioData, getStemAudio, playingStem]);
 
   const handleClearLoop = useCallback(() => {
     audio.clearLoop();
@@ -674,6 +647,34 @@ export function Analyze({ theme, t }) {
         runAIDetection(audioToAnalyze, isAnalyzingStem, analysisOptions, instrumentDetection, effectiveStem);
       }
 
+      // Extract wavetable from audio in background (non-blocking)
+      // Decodes audio → slices single-cycle waveforms → base64 encodes for Vital preset injection
+      (async () => {
+        try {
+          const tempCtx = new AudioContext({ sampleRate: 48000 });
+          try {
+            const buffer = await tempCtx.decodeAudioData(audioToAnalyze.slice(0));
+            let channelData = buffer.getChannelData(0);
+
+            // If region selected, slice to that region
+            if (analysisOptions.regionStart != null && analysisOptions.regionEnd != null) {
+              const startSample = Math.floor(analysisOptions.regionStart * buffer.sampleRate);
+              const endSample = Math.floor(analysisOptions.regionEnd * buffer.sampleRate);
+              channelData = channelData.slice(startSample, endSample);
+            }
+
+            const wtResult = await audio.extractWavetable(channelData, buffer.sampleRate, 256);
+            if (wtResult?.success) {
+              setWavetableData(wtResult);
+            }
+          } finally {
+            tempCtx.close();
+          }
+        } catch (err) {
+          console.warn('Wavetable extraction failed (non-critical):', err.message);
+        }
+      })();
+
       // Smart instrument selection:
       // - For stems: auto-map stem type to instrument (bass→bass, drums→drums, vocals→vocal, other→top detection)
       // - For non-stem: use the top detected instrument as the smart default
@@ -702,6 +703,10 @@ export function Analyze({ theme, t }) {
       };
       setAnalysis(newAnalysis);
 
+      // Mark Step 1 complete, auto-expand Step 2
+      setCompletedSteps(new Set([1]));
+      setExpandedSteps(new Set([2]));
+
       trackAnalysisCompleted({
         instrument: instrumentToUse,
         bpm: result.features.bpm?.bpm,
@@ -717,11 +722,14 @@ export function Analyze({ theme, t }) {
       // Save to history (check storage limit first)
       if (subscription.canSaveAnalysis()) {
         const isRegionAnalysis = analysisOptions.regionStart != null;
-        let historyTitle = audioMetadata.title;
+        // Strip any existing parenthetical suffix to prevent duplication
+        // e.g. "Pumpin (bass)" → "Pumpin", "Pumpin (bass) (bass)" → "Pumpin"
+        const baseTitle = (audioMetadata.title || 'Untitled').replace(/(\s*\([^)]*\))+$/, '').trim();
+        let historyTitle = baseTitle;
         if (isAnalyzingStem) {
-          historyTitle = `${audioMetadata.title} (${effectiveStem})`;
+          historyTitle = `${baseTitle} (${effectiveStem})`;
         } else if (isRegionAnalysis) {
-          historyTitle = `${audioMetadata.title} (${audio.formatTime(analysisOptions.regionStart)}-${audio.formatTime(analysisOptions.regionEnd)})`;
+          historyTitle = `${baseTitle} (${audio.formatTime(analysisOptions.regionStart)}-${audio.formatTime(analysisOptions.regionEnd)})`;
         }
         addToHistory({
           id: Date.now().toString(),
@@ -744,7 +752,8 @@ export function Analyze({ theme, t }) {
 
     setIsAnalyzing(false);
     setAnalyzingStemType(null);
-  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, addToHistory, stems, stemAudioData, getStemAudio, profile?.daw_preference, subscription.canAnalyze, subscription.incrementAnalyses, runAIDetection, audioBlobUrl]);
+    toast.success('Analysis complete');
+  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, addToHistory, stems, stemAudioData, getStemAudio, profile?.daw_preference, subscription.canAnalyze, subscription.incrementAnalyses, runAIDetection, audioBlobUrl, toast]);
 
   // Quick re-analyze: regenerate recommendations for a different instrument
   // without re-running the full DSP pipeline (audio region hasn't changed)
@@ -873,6 +882,7 @@ export function Analyze({ theme, t }) {
     trackAudioUpload(file.name, file.size);
 
     setAnalysis(null);
+    setWavetableData(null);
     setDetectedInstruments(null);
     audio.reset();
     handleClearLoop();
@@ -884,6 +894,9 @@ export function Analyze({ theme, t }) {
     stemWaveformHiResRef.current = null;
     stemWaveformDataRef.current = {};
     setStemLoopRegions({});
+    // Reset step flow
+    setExpandedSteps(new Set([1]));
+    setCompletedSteps(new Set());
   };
 
   // Demo sound handler — generates a synth chord via Web Audio API
@@ -898,6 +911,7 @@ export function Analyze({ theme, t }) {
       setAudioMetadata({ title: 'Demo Synth Chord', artist: 'SoundSauce Demo' });
       setAudioFileData(wavBuffer);
       setAnalysis(null);
+      setWavetableData(null);
       setDetectedInstruments(null);
       audio.reset();
       handleClearLoop();
@@ -1067,10 +1081,30 @@ export function Analyze({ theme, t }) {
     setAudioMetadata({ title: item.title, artist: 'From History' });
   };
 
-  // Preset selection callback from PresetSelector
+  // Preset selection callback from PresetSelector (fires on select, NOT download)
   const handlePresetSelected = () => {
     trackPresetExported(selectedInstrument || 'lead');
   };
+
+  // Preset download callback — fires only when user actually downloads a .vital file
+  const handlePresetDownloaded = useCallback(() => {
+    setCompletedSteps(prev => new Set([...prev, 2]));
+    setExpandedSteps(prev => {
+      const next = new Set(prev);
+      next.add(3);
+      return next;
+    });
+  }, []);
+
+  // Step flow toggle handler
+  const toggleStep = useCallback((stepNum) => {
+    setExpandedSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(stepNum)) next.delete(stepNum);
+      else next.add(stepNum);
+      return next;
+    });
+  }, []);
 
   const copyToClipboard = async () => {
     if (!analysis) return;
@@ -1120,6 +1154,57 @@ Generated by SoundSauce`;
     await navigator.clipboard.writeText(text);
   };
 
+  const buildShareData = useCallback(() => {
+    if (!analysis) return { text: '', title: '', instrument: '' };
+
+    const features = analysis.features;
+    const title = audioMetadata.title || 'Untitled';
+    const instrument = selectedInstrument !== 'full'
+      ? instrumentLabels[selectedInstrument]?.label || selectedInstrument
+      : '';
+
+    // Top detected instrument with confidence
+    const topInstrument = analysis.detectedInstruments?.[0];
+    const detectedLine = topInstrument
+      ? `Detected: ${instrumentLabels[topInstrument.instrument]?.label || topInstrument.instrument} (${topInstrument.confidence}%)`
+      : '';
+
+    const bpmVal = features.bpm?.bpm;
+    const keyVal = features.key?.scale;
+    const waveformVal = features.waveform?.type;
+    const brightnessVal = typeof features.brightness === 'number'
+      ? features.brightness.toFixed(2)
+      : features.brightness;
+    const attackVal = features.attackTime;
+
+    const parts = [
+      bpmVal ? `BPM: ${bpmVal}` : '',
+      keyVal ? `Key: ${keyVal}` : '',
+      waveformVal ? `Waveform: ${waveformVal}` : '',
+    ].filter(Boolean).join(' | ');
+
+    const details = [
+      brightnessVal ? `Brightness: ${brightnessVal}` : '',
+      attackVal ? `Attack: ${attackVal}ms` : '',
+    ].filter(Boolean).join(' | ');
+
+    const lines = [
+      `Sound Analysis — ${title}`,
+      '',
+      parts,
+      details,
+      detectedLine,
+      '',
+      'Analyzed with SoundSauce — soundsauce.app',
+    ].filter(line => line !== undefined);
+
+    return {
+      text: lines.join('\n'),
+      title: `Sound Analysis — ${title}`,
+      instrument: selectedInstrument,
+    };
+  }, [analysis, audioMetadata.title, selectedInstrument]);
+
   const handleSeek = (e) => {
     if (!audio.audioBuffer || !audio.duration) return;
 
@@ -1135,12 +1220,53 @@ Generated by SoundSauce`;
     <div className={`${t.text} p-4 md:p-8`}>
       <div className="max-w-7xl mx-auto">
         {error && (
-          <div className={`rounded-xl p-4 mb-6 backdrop-blur ${
+          <div className={`rounded-xl p-5 mb-6 backdrop-blur ${
             theme === 'dark'
               ? 'bg-red-500/10 border border-red-500/50'
               : 'bg-red-50 border border-red-200'
           }`}>
-            <p className={theme === 'dark' ? 'text-red-300' : 'text-red-700'}>{error}</p>
+            <div className="flex items-start gap-3">
+              <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${theme === 'dark' ? 'text-red-400' : 'text-red-600'}`} />
+              <div className="flex-1 min-w-0">
+                <p className={`font-medium mb-1 ${theme === 'dark' ? 'text-red-300' : 'text-red-700'}`}>{error}</p>
+                {/* Recovery actions — shown when no audio is loaded (e.g. failed session restore) */}
+                {!audioFileData && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      onClick={() => {
+                        setError(null);
+                        setSearchParams({}, { replace: true });
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        theme === 'dark'
+                          ? 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                          : 'bg-white text-stone-800 border border-stone-300 hover:bg-stone-50'
+                      }`}
+                    >
+                      Start a New Analysis
+                    </button>
+                    <button
+                      onClick={() => {
+                        setError(null);
+                        setSearchParams({}, { replace: true });
+                        // Scroll to the upload area which is now visible after error is cleared
+                        setTimeout(() => {
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }, 50);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        theme === 'dark'
+                          ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600'
+                          : 'bg-ember-600 text-white hover:bg-ember-700'
+                      }`}
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      Upload Audio
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -1279,15 +1405,17 @@ Generated by SoundSauce`;
               t={t}
             />
 
-            {/* Spectrum Visualizer */}
-            <SpectrumAnalyzer
-              spectrumData={audio.spectrumData}
-              brightness={audio.brightness}
-              isPlaying={audio.isPlaying}
-              loopEnabled={audio.loopEnabled}
-              theme={theme}
-              t={t}
-            />
+            {/* Spectrum Visualizer — only show when playing */}
+            {(audio.isPlaying || audio.spectrumData.length > 0) && (
+              <SpectrumAnalyzer
+                spectrumData={audio.spectrumData}
+                brightness={audio.brightness}
+                isPlaying={audio.isPlaying}
+                loopEnabled={audio.loopEnabled}
+                theme={theme}
+                t={t}
+              />
+            )}
 
             {/* Playback Controls */}
             <PlaybackControls
@@ -1307,186 +1435,56 @@ Generated by SoundSauce`;
             />
 
             {/* Action Area — adapts based on audio length and stem state */}
-            {(() => {
-              const hasStems = stems !== null;
-              const isProcessing = separationStatus === 'uploading' || separationStatus === 'processing';
-              const isShortAudio = audio.duration <= 15;
-              const viewLoopEnabled = activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled;
-              const viewLoopStart = activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart;
-              const viewLoopEnd = activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd;
-              const hasLoopRegion = viewLoopEnabled && viewLoopStart != null && viewLoopEnd != null;
+            <div ref={analyzeSectionRef}>
+            {/* Analyze button — always visible */}
+            <AnalyzeSection
+              loopEnabled={activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled}
+              loopStart={activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart}
+              loopEnd={activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd}
+              formatTime={audio.formatTime}
+              isAnalyzing={isAnalyzing}
+              onAnalyze={activeStemView ? () => runAnalysis(activeStemView) : runAnalysis}
+              theme={theme}
+            />
 
-              // Short audio or loop region selected: show AnalyzeSection directly
-              if ((isShortAudio || hasLoopRegion) && !hasStems && !isProcessing) {
-                return (
-                  <>
-                    <AnalyzeSection
-                      loopEnabled={viewLoopEnabled}
-                      loopStart={viewLoopStart}
-                      loopEnd={viewLoopEnd}
-                      formatTime={audio.formatTime}
-                      isAnalyzing={isAnalyzing}
-                      onAnalyze={runAnalysis}
-                      theme={theme}
-                    />
-                    {!isShortAudio && (
-                      <div className="mb-6" ref={stemSectionRef}>
-                        <StemSelector
-                          stems={stems}
-                          stemAudioData={stemAudioData}
-                          separationStatus={separationStatus}
-                          separationProgress={separationProgress}
-                          separationError={separationError}
-                          selectedStem={selectedInstrument}
-                          onSelectStem={handleSelectStem}
-                          playingStem={playingStem}
-                          onSeparate={handleSeparateStems}
-                          onPlayStem={handlePlayStem}
-                          onDownloadStem={handleDownloadStem}
-                          onCancel={cancelSeparation}
-                          hasAudio={!!audioFileData}
-                          freeTierLabel={user && tier === 'free' ? `${subscription.stemsRemaining}/${subscription.limits.stems} free` : null}
-                          theme={theme}
-                          t={t}
-                        />
-                      </div>
-                    )}
-                  </>
-                );
-              }
+            {/* Stem separation — always visible for non-short audio */}
+            {audio.duration > 15 && (
+              <div className="mb-6" ref={stemSectionRef}>
+                <StemSelector
+                  stems={stems}
+                  stemAudioData={stemAudioData}
+                  separationStatus={separationStatus}
+                  separationProgress={separationProgress}
+                  separationError={separationError}
+                  selectedStem={selectedInstrument}
+                  onSelectStem={handleSelectStem}
+                  playingStem={playingStem}
+                  onAnalyzeStem={handleAnalyzeStem}
+                  analyzingStem={analyzingStemType}
+                  analyzedStem={analysis?.analyzedStem || null}
+                  onSeparate={handleSeparateStems}
+                  onPlayStem={handlePlayStem}
+                  onDownloadStem={handleDownloadStem}
+                  onCancel={cancelSeparation}
+                  hasAudio={!!audioFileData}
+                  freeTierLabel={user && tier === 'free' ? `${subscription.stemsRemaining}/${subscription.limits.stems} free` : null}
+                  theme={theme}
+                  t={t}
+                />
+              </div>
+            )}
+            </div>
 
-              // Long audio, no stems yet, not processing: stem-first guidance
-              if (!hasStems && !isProcessing) {
-                return (
-                  <div className="mb-6" ref={stemSectionRef}>
-                    <div className={`p-5 ${t.card}`}>
-                      <div className="mb-4">
-                        <h4 className={`font-semibold text-lg ${t.text}`}>How would you like to analyze?</h4>
-                        <p className={`text-sm mt-1 ${t.textMuted}`}>
-                          For best results with full songs, separate stems first to isolate individual instruments.
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* Primary CTA: Separate Stems */}
-                        <button
-                          onClick={handleSeparateStems}
-                          disabled={!audioFileData}
-                          className={`flex items-center gap-3 p-4 rounded-lg text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            theme === 'dark'
-                              ? 'bg-white text-black hover:bg-stone-200'
-                              : 'bg-gradient-to-r from-ember-500 to-amber-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
-                          }`}
-                        >
-                          <div className={`w-10 h-10 flex items-center justify-center rounded-lg flex-shrink-0 ${
-                            theme === 'dark' ? 'bg-black/10' : 'bg-white/20'
-                          }`}>
-                            <Scissors className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="font-semibold flex items-center gap-2">
-                              Separate Stems
-                              {user && tier === 'free' && (
-                                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                  theme === 'dark' ? 'bg-black/20' : 'bg-white/30'
-                                }`}>
-                                  <Zap className="w-3 h-3 inline mr-0.5" />
-                                  {subscription.stemsRemaining}/{subscription.limits.stems}
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-sm ${theme === 'dark' ? 'text-black/60' : 'text-white/80'}`}>
-                              Isolate vocals, drums, bass, and other
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Secondary CTA: Analyze Full Track */}
-                        <button
-                          onClick={() => runAnalysis()}
-                          disabled={isAnalyzing}
-                          className={`flex items-center gap-3 p-4 rounded-lg text-left transition-colors ${
-                            theme === 'dark'
-                              ? 'bg-zinc-800 hover:bg-zinc-700 text-white'
-                              : 'bg-stone-100 hover:bg-stone-200 text-black'
-                          }`}
-                        >
-                          <div className={`w-10 h-10 flex items-center justify-center rounded-lg flex-shrink-0 ${
-                            theme === 'dark' ? 'bg-zinc-700' : 'bg-stone-200'
-                          }`}>
-                            {isAnalyzing ? (
-                              <Loader2 className={`w-5 h-5 animate-spin ${theme === 'dark' ? 'text-white' : 'text-black'}`} />
-                            ) : (
-                              <Sparkles className={`w-5 h-5 ${theme === 'dark' ? 'text-white' : 'text-black'}`} />
-                            )}
-                          </div>
-                          <div>
-                            <div className="font-semibold">{isAnalyzing ? 'Analyzing...' : 'Analyze Full Track'}</div>
-                            <div className={`text-sm ${t.textMuted}`}>
-                              Quick analysis of the entire mix
-                            </div>
-                          </div>
-                        </button>
-                      </div>
-
-                      {separationError && (
-                        <div className={`mt-3 p-3 rounded-md ${theme === 'dark' ? 'bg-red-950' : 'bg-red-50'}`}>
-                          <p className="text-sm text-red-500">{separationError}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-
-              // Stems processing or ready: show StemSelector (with per-stem Analyze buttons when ready)
-              return (
-                <>
-                {activeStemView && hasLoopRegion && (
-                  <AnalyzeSection
-                    loopEnabled={viewLoopEnabled}
-                    loopStart={viewLoopStart}
-                    loopEnd={viewLoopEnd}
-                    formatTime={audio.formatTime}
-                    isAnalyzing={isAnalyzing}
-                    onAnalyze={() => runAnalysis(activeStemView)}
-                    theme={theme}
-                  />
-                )}
-                <div className="mb-6" ref={stemSectionRef}>
-                  <StemSelector
-                    stems={stems}
-                    stemAudioData={stemAudioData}
-                    separationStatus={separationStatus}
-                    separationProgress={separationProgress}
-                    separationError={separationError}
-                    selectedStem={selectedInstrument}
-                    onSelectStem={handleSelectStem}
-                    playingStem={playingStem}
-                    onAnalyzeStem={handleAnalyzeStem}
-                    analyzingStem={analyzingStemType}
-                    analyzedStem={analysis?.analyzedStem || null}
-                    onSeparate={handleSeparateStems}
-                    onPlayStem={handlePlayStem}
-                    onDownloadStem={handleDownloadStem}
-                    onCancel={cancelSeparation}
-                    hasAudio={!!audioFileData}
-                    freeTierLabel={user && tier === 'free' ? `${subscription.stemsRemaining}/${subscription.limits.stems} free` : null}
-                    theme={theme}
-                    t={t}
-                  />
-                </div>
-                </>
-              );
-            })()}
-
-            {/* Detected Instruments — shown AFTER analysis */}
+            {/* Detected Instruments — shown AFTER analysis (non-compact, outside step flow) */}
             {detectedInstruments && analysis && (() => {
-              // Determine if we should show full-mix guidance.
-              // Short audio (≤10s) is NEVER flagged as full mix — a 3-second synth chord is not a mix.
               const analyzedFullTrack = !analysis.analyzedStem && !(audio.loopEnabled && audio.loopStart != null);
               const isLongAudio = audio.duration > 10;
               const multipleInstruments = (detectedInstruments.instrumentsAboveThreshold || 0) >= 3;
               const shouldShowMixGuidance = isLongAudio && (detectedInstruments.isFullMix || (analyzedFullTrack && multipleInstruments));
+
+              // Only show standalone InstrumentSelector when mix guidance is needed
+              // Otherwise, the compact version lives inside Step 1
+              if (!shouldShowMixGuidance) return null;
 
               return (
               <InstrumentSelector
@@ -1506,9 +1504,10 @@ Generated by SoundSauce`;
           </div>
         )}
 
+        {/* ===== GUIDED STEP FLOW — post-analysis ===== */}
         {analysis && (
-          <div className="space-y-6">
-            {/* Usage Progress Bar — free tier only, after successful analysis */}
+          <div className="space-y-4">
+            {/* Usage Progress Bar — free tier only */}
             {user && tier === 'free' && subscription.usage && (
               <div className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${
                 theme === 'dark' ? 'bg-zinc-900 border border-zinc-800' : 'bg-amber-50/50 border border-amber-200/50'
@@ -1523,7 +1522,7 @@ Generated by SoundSauce`;
                       }`}
                     >
                       <Zap className="w-3.5 h-3.5" />
-                      Upgrade to Pro for unlimited
+                      Upgrade
                     </Link>
                   </div>
                   <div className={`h-2 rounded-full overflow-hidden ${
@@ -1540,398 +1539,44 @@ Generated by SoundSauce`;
               </div>
             )}
 
-            {/* Guest "Save Your Work" Prompt — unauthenticated users after analysis */}
-            {!user && !dismissedSavePrompt && (
-              <div className={`p-5 rounded-lg border ${
-                theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-amber-200/50'
-              }`}>
-                <div className="flex items-start gap-4">
-                  <div className={`p-2 rounded-md flex-shrink-0 ${
-                    theme === 'dark' ? 'bg-zinc-800' : 'bg-gradient-to-r from-ember-500 to-amber-600'
-                  }`}>
-                    <UserPlus className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className={`font-bold text-sm mb-1 ${t.text}`}>Your analysis is ready!</h4>
-                    <p className={`text-sm mb-3 ${t.textMuted}`}>
-                      Sign up to save it. You'll lose this if you leave the page.
-                    </p>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => {
-                          trackSavePromptConverted();
-                          setShowAuthModal(true);
-                        }}
-                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                          theme === 'dark'
-                            ? 'bg-white text-black hover:bg-stone-200'
-                            : 'bg-gradient-to-r from-ember-500 to-amber-600 text-white hover:opacity-90 shadow-lg shadow-ember-500/20'
-                        }`}
-                      >
-                        Create Free Account
-                      </button>
-                      <button
-                        onClick={() => {
-                          trackSavePromptDismissed();
-                          setDismissedSavePrompt(true);
-                        }}
-                        className={`text-sm ${t.textMuted} ${theme === 'dark' ? 'hover:text-zinc-50' : 'hover:text-stone-900'}`}
-                      >
-                        Continue without saving
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Copy Button */}
             <ExportToolbar
               onCopy={copyToClipboard}
+              onShare={buildShareData}
               theme={theme}
             />
 
-            {/* Tabbed Results Interface */}
             <div ref={resultsSectionRef} />
-            <ResultsTabs theme={theme} t={t} dawPreference={profile?.daw_preference}>
-              {/* === VITAL PRESET TAB === */}
-              <div data-tab="vital">
-                <PresetSelector
-                  key={selectedInstrument}
-                  detectedInstrument={selectedInstrument}
-                  audioTitle={audioMetadata?.title}
-                  theme={theme}
-                  t={t}
-                  onPresetSelected={handlePresetSelected}
-                  hasDownloadedPreset={hasDownloadedPreset}
-                  onTrackDownload={trackCuratedDownload}
-                  analysisFeatures={analysis?.features || null}
-                />
 
-                {/* Vital Synthesis Tips */}
-                {analysis && (
-                  <div className={`mt-6 p-6 ${t.card}`}>
-                    <div className="flex items-center gap-2 mb-4">
-                      <Sliders className={`w-5 h-5 ${theme === 'dark' ? 'text-white' : 'text-ember-600'}`} />
-                      <h2 className={`text-xl font-bold ${t.text}`}>Vital Synthesis Tips</h2>
-                    </div>
-                    <VitalGuide
-                      features={analysis.features}
-                      soundType={getDAWRecipe(analysis.features, selectedInstrument, 'FL Studio').soundType}
-                      theme={theme}
-                      t={t}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* === DAW RECIPE TAB === */}
-              <div data-tab="daw" className={`p-6 ${t.card}`}>
-                {/* DAW preference prompt */}
-                {!profile?.daw_preference && (
-                  <div className={`mb-4 p-4 flex items-center gap-3 rounded-lg ${
-                    theme === 'dark' ? 'bg-zinc-900 border border-zinc-800' : 'bg-amber-50/30 border border-amber-200/50'
-                  }`}>
-                    <Settings className={`w-4 h-4 flex-shrink-0 ${t.textMuted}`} />
-                    <p className={`text-sm ${t.textMuted}`}>
-                      <Link to="/settings" className={`font-medium ${theme === 'dark' ? 'text-white hover:underline' : 'text-ember-600 hover:underline'}`}>
-                        Set your DAW in Settings
-                      </Link>
-                      {' '}to get personalized plugin recommendations.
-                    </p>
-                  </div>
-                )}
-
-                <SoundSauce
-                  analysis={analysis}
-                  theme={theme}
-                  t={t}
-                  selectedInstrument={selectedInstrument}
-                  dawPreference={profile?.daw_preference}
-                  showVitalSection={false}
-                />
-
-                {/* Plugin & Mix Reference — collapsible accordion */}
-                <DAWSettingsAccordion analysis={analysis} theme={theme} t={t} />
-              </div>
-
-              {/* === DETAILED ANALYSIS TAB === */}
-              <div data-tab="detailed" className="space-y-4">
-
-                {/* BPM + Key Row */}
-                {(analysis.features.bpm || analysis.features.key) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* BPM Card */}
-                    {analysis.features.bpm && (
-                      <div className={`p-4 border rounded-lg ${theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'}`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="BPM">BPM</Tooltip></span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'} ${t.textMuted}`}>
-                            {analysis.features.bpm.confidence > 70 ? 'High confidence' :
-                             analysis.features.bpm.confidence > 40 ? 'Medium confidence' : 'Low confidence'}
-                          </span>
-                        </div>
-                        <div className={`text-3xl font-bold ${t.text}`}>
-                          {Math.round(analysis.features.bpm.suggestedTempo || analysis.features.bpm.bpm)}
-                        </div>
-                        <div className={`text-xs mt-1 ${t.textMuted}`}>
-                          {analysis.features.bpm.tempoRange} tempo
-                        </div>
-                        {(analysis.features.bpm.halfTempo || analysis.features.bpm.doubleTempo) && (
-                          <div className={`flex gap-2 mt-2 flex-wrap`}>
-                            {analysis.features.bpm.halfTempo > 0 && (
-                              <span className={`text-xs px-2 py-1 rounded-full ${theme === 'dark' ? 'bg-zinc-950 text-zinc-400' : 'bg-stone-100 text-zinc-500'}`}>
-                                Half: {Math.round(analysis.features.bpm.halfTempo)}
-                              </span>
-                            )}
-                            {analysis.features.bpm.doubleTempo > 0 && (
-                              <span className={`text-xs px-2 py-1 rounded-full ${theme === 'dark' ? 'bg-zinc-950 text-zinc-400' : 'bg-stone-100 text-zinc-500'}`}>
-                                Double: {Math.round(analysis.features.bpm.doubleTempo)}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Key Card */}
-                    {analysis.features.key && (
-                      <div className={`p-4 border rounded-lg ${theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'}`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Key">KEY</Tooltip></span>
-                          {analysis.features.key.camelot && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'} ${t.textMuted}`}>
-                              {analysis.features.key.camelot}
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-3xl font-bold ${t.text}`}>
-                          {analysis.features.key.key} {analysis.features.key.mode}
-                        </div>
-                        {analysis.features.key.scaleNotes && (
-                          <div className={`flex gap-1 mt-2 flex-wrap`}>
-                            {analysis.features.key.scaleNotes.map((note, i) => (
-                              <span key={i} className={`text-xs px-1.5 py-0.5 rounded ${theme === 'dark' ? 'bg-zinc-950 text-zinc-400' : 'bg-stone-100 text-zinc-500'}`}>
-                                {note}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {analysis.features.key.compatibleKeys && (
-                          <div className={`text-xs mt-2 ${t.textMuted}`}>
-                            Compatible: {analysis.features.key.compatibleKeys.slice(0, 3).map(k => k.code).join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Waveform Type Card */}
-                {analysis.features.waveform && (
-                  <div className={`p-4 border rounded-lg ${theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Waveform">WAVEFORM</Tooltip></span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'} ${t.textMuted}`}>
-                        {analysis.features.waveform.confidence}% match
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className={`text-2xl font-bold capitalize ${t.text}`}>
-                        {analysis.features.waveform.type}
-                      </div>
-                      {analysis.features.waveform.fundamentalFreq > 0 && (
-                        <span className={`text-sm ${t.textMuted}`}>
-                          ({analysis.features.waveform.fundamentalFreq} Hz fundamental)
-                        </span>
-                      )}
-                    </div>
-                    {analysis.features.waveform.synthRecommendation && (
-                      <div className={`text-xs mt-2 p-2 rounded-md ${theme === 'dark' ? 'bg-zinc-950' : 'bg-stone-100'}`}>
-                        <span className={t.textMuted}>Tip:</span> {analysis.features.waveform.synthRecommendation}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ADSR Envelope */}
-                {analysis.features.adsr && (
-                  <ADSREnvelope adsr={analysis.features.adsr} theme={theme} t={t} />
-                )}
-
-                {/* Tone, Frequency, Texture, Level — 4-card grid */}
-                {(() => {
-                  const brightness = parseFloat(analysis.features.brightness) || 0;
-                  const centroid = parseFloat(analysis.features.spectralCentroid) || 0;
-                  const harmonicity = parseFloat(analysis.features.harmonicity) || 0;
-                  const rmsVal = parseFloat(analysis.features.rms) || 0;
-                  const rmsDb = rmsVal > 0 ? (20 * Math.log10(rmsVal)).toFixed(1) : '-\u221E';
-                  const cardClass = `p-3 border rounded-lg ${theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'}`;
-                  const badgeClass = `text-xs px-2 py-0.5 rounded-full ${theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'} ${t.textMuted}`;
-                  const tipClass = `text-xs mt-2 p-2 rounded-md ${theme === 'dark' ? 'bg-zinc-950' : 'bg-stone-100'}`;
-                  return (
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                      {/* Tone/Brightness Card */}
-                      <div className={cardClass}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Tone">TONE</Tooltip></span>
-                          <span className={badgeClass}>
-                            {brightness > 0.6 ? 'Bright' : brightness > 0.3 ? 'Balanced' : 'Dark'}
-                          </span>
-                        </div>
-                        <div className={`text-2xl font-bold ${t.text}`}>
-                          {(brightness * 100).toFixed(0)}%
-                        </div>
-                        <div className={tipClass}>
-                          <span className={t.textMuted}>→</span> {
-                            brightness > 0.6 ? 'Open filter cutoff fully' :
-                            brightness > 0.3 ? 'Filter cutoff around 50-70%' :
-                            'Close filter cutoff to 20-40%'
-                          }
-                        </div>
-                      </div>
-
-                      {/* Spectral Center Card */}
-                      <div className={cardClass}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Frequency Center">FREQ CENTER</Tooltip></span>
-                          <span className={badgeClass}>
-                            {centroid > 2000 ? 'High' : centroid > 500 ? 'Mid' : 'Low'}
-                          </span>
-                        </div>
-                        <div className={`text-2xl font-bold ${t.text}`}>
-                          {Math.round(centroid)} Hz
-                        </div>
-                        <div className={tipClass}>
-                          <span className={t.textMuted}>→</span> {
-                            centroid > 2000 ? 'Sits in high-mids' :
-                            centroid > 500 ? 'Balanced presence' :
-                            'Bass-heavy, needs low-end room'
-                          }
-                        </div>
-                      </div>
-
-                      {/* Harmonicity/Texture Card */}
-                      <div className={cardClass}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Texture">TEXTURE</Tooltip></span>
-                          <span className={badgeClass}>
-                            {harmonicity > 0.7 ? 'Tonal' : harmonicity > 0.4 ? 'Complex' : 'Inharmonic'}
-                          </span>
-                        </div>
-                        <div className={`text-2xl font-bold ${t.text}`}>
-                          {(harmonicity * 100).toFixed(0)}%
-                        </div>
-                        <div className={tipClass}>
-                          <span className={t.textMuted}>→</span> {
-                            harmonicity > 0.7 ? 'Clean pitched sound — use Saw/Square oscillators' :
-                            harmonicity > 0.4 ? 'Some inharmonic content — try FM or wavetable synthesis' :
-                            'Noise-heavy — try noise oscillator, FM, or granular synthesis'
-                          }
-                        </div>
-                      </div>
-
-                      {/* Loudness/Dynamics Card */}
-                      <div className={cardClass}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-xs font-medium ${t.textDimmed}`}><Tooltip term="Level">LEVEL</Tooltip></span>
-                          <span className={badgeClass}>
-                            {rmsVal > 0.3 ? 'Hot' : rmsVal > 0.1 ? 'Nominal' : 'Quiet'}
-                          </span>
-                        </div>
-                        <div className={`text-2xl font-bold ${t.text}`}>
-                          {rmsDb} <span className="text-sm font-normal">dBFS</span>
-                        </div>
-                        <div className={tipClass}>
-                          <span className={t.textMuted}>→</span> {
-                            rmsVal > 0.3 ? 'Hot source — watch for clipping' :
-                            rmsVal > 0.1 ? 'Good level for processing' :
-                            'Quiet — may need gain staging'
-                          }
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-              </div>
-
-            </ResultsTabs>
-
-            {/* Next Steps CTA */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Card 1: Try recreating */}
-              <button
-                onClick={() => {
-                  const el = document.getElementById('quick-compare-section');
-                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className={`group p-4 rounded-lg border text-left transition-all ${
-                  theme === 'dark'
-                    ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-600'
-                    : 'bg-white border-stone-200 hover:border-ember-500 hover:shadow-md hover:shadow-ember-500/5'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-md flex items-center justify-center mb-2.5 transition-colors ${
-                  theme === 'dark'
-                    ? 'bg-zinc-800 group-hover:bg-ember-500/20'
-                    : 'bg-amber-50 group-hover:bg-amber-100'
-                }`}>
-                  <Upload className={`w-4 h-4 ${theme === 'dark' ? 'text-zinc-400 group-hover:text-ember-500' : 'text-ember-600'}`} />
-                </div>
-                <div className={`text-sm font-medium ${t.text}`}>Compare Your Recreation</div>
-                <div className={`text-xs mt-0.5 ${t.textMuted}`}>Upload your attempt and see how close you got</div>
-              </button>
-
-              {/* Card 2: Browse similar */}
-              <Link
-                to={`/discover${selectedInstrument && selectedInstrument !== 'full' ? `?tag=${encodeURIComponent(selectedInstrument)}` : ''}`}
-                className={`group p-4 rounded-lg border text-left transition-all ${
-                  theme === 'dark'
-                    ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-600'
-                    : 'bg-white border-stone-200 hover:border-ember-500 hover:shadow-md hover:shadow-ember-500/5'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-md flex items-center justify-center mb-2.5 transition-colors ${
-                  theme === 'dark'
-                    ? 'bg-zinc-800 group-hover:bg-ember-500/20'
-                    : 'bg-amber-50 group-hover:bg-amber-100'
-                }`}>
-                  <Compass className={`w-4 h-4 ${theme === 'dark' ? 'text-zinc-400 group-hover:text-ember-500' : 'text-ember-600'}`} />
-                </div>
-                <div className={`text-sm font-medium ${t.text}`}>Browse Sound Sauces</div>
-                <div className={`text-xs mt-0.5 ${t.textMuted}`}>Find similar sounds from the community</div>
-              </Link>
-
-              {/* Card 3: Download preset */}
-              <button
-                onClick={() => {
-                  resultsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                className={`group p-4 rounded-lg border text-left transition-all ${
-                  theme === 'dark'
-                    ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-600'
-                    : 'bg-white border-stone-200 hover:border-ember-500 hover:shadow-md hover:shadow-ember-500/5'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-md flex items-center justify-center mb-2.5 transition-colors ${
-                  theme === 'dark'
-                    ? 'bg-zinc-800 group-hover:bg-ember-500/20'
-                    : 'bg-amber-50 group-hover:bg-amber-100'
-                }`}>
-                  <Download className={`w-4 h-4 ${theme === 'dark' ? 'text-zinc-400 group-hover:text-ember-500' : 'text-ember-600'}`} />
-                </div>
-                <div className={`text-sm font-medium ${t.text}`}>Download Preset</div>
-                <div className={`text-xs mt-0.5 ${t.textMuted}`}>Get the .vital preset file for this sound</div>
-              </button>
-            </div>
-
-            {/* Quick Compare — client-side recreation comparison */}
-            <QuickCompare
-              audioFileData={audioFileData}
-              sampleRate={audio.audioBuffer?.sampleRate || 44100}
+            <AnalysisStepFlow
+              completedSteps={completedSteps}
+              expandedSteps={expandedSteps}
+              toggleStep={toggleStep}
               theme={theme}
               t={t}
+              analysis={analysis}
+              detectedInstruments={detectedInstruments}
+              selectedInstrument={selectedInstrument}
+              audio={audio}
+              audioFileData={audioFileData}
+              audioMetadata={audioMetadata}
+              wavetableData={wavetableData}
+              stems={stems}
+              aiDetectionStatus={aiDetectionStatus}
+              user={user}
+              profile={profile}
+              reAnalyzeWithInstrument={reAnalyzeWithInstrument}
+              scrollToStems={scrollToStems}
+              scrollToWaveform={scrollToWaveform}
+              handlePresetSelected={handlePresetSelected}
+              handlePresetDownloaded={handlePresetDownloaded}
+              hasDownloadedPreset={hasDownloadedPreset}
+              trackCuratedDownload={trackCuratedDownload}
+              setAuthContext={setAuthContext}
+              setShowAuthModal={setShowAuthModal}
+              pendingPresetDownloadRef={pendingPresetDownloadRef}
+              dismissedSavePrompt={dismissedSavePrompt}
+              setDismissedSavePrompt={setDismissedSavePrompt}
             />
           </div>
         )}
@@ -1952,13 +1597,51 @@ Generated by SoundSauce`;
           t={t}
         />
 
-        {/* Auth Modal — triggered by guest save prompt */}
+        {/* Auth Modal — triggered by guest save/download prompt */}
         {showAuthModal && (
           <AuthModal
             isOpen={showAuthModal}
-            onClose={() => setShowAuthModal(false)}
+            onClose={() => {
+              setShowAuthModal(false);
+              setAuthContext(null);
+            }}
             theme={theme}
+            context={authContext}
           />
+        )}
+
+        {/* Floating Analyze CTA — appears when main AnalyzeSection scrolls out of view */}
+        {audioFileData && !analysis && showFloatingAnalyze && (
+          (() => {
+            const viewLoopEnabled = activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled;
+            const viewLoopStart = activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart;
+            const viewLoopEnd = activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd;
+            const hasRegion = viewLoopEnabled && viewLoopStart != null && viewLoopEnd != null;
+            const regionDuration = hasRegion ? (viewLoopEnd - viewLoopStart).toFixed(1) : null;
+
+            return (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+                <button
+                  onClick={() => runAnalysis(activeStemView || undefined)}
+                  disabled={isAnalyzing}
+                  className={`flex items-center gap-2 px-6 py-3 rounded-full font-semibold shadow-lg transition-all ${
+                    theme === 'dark'
+                      ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600 shadow-ember-500/30'
+                      : 'bg-ember-600 text-white hover:bg-ember-700 shadow-ember-600/30'
+                  } backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {isAnalyzing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : hasRegion ? (
+                    <Scissors className="w-4 h-4" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  {isAnalyzing ? 'Analyzing...' : hasRegion ? `Analyze Selection (${regionDuration}s)` : 'Analyze'}
+                </button>
+              </div>
+            );
+          })()
         )}
       </div>
     </div>

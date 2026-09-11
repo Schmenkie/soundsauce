@@ -18,6 +18,8 @@
 
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import { validateServerEnv } from './_validateEnv.js';
+import { posthog } from './_posthog.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -85,6 +87,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  if (validateServerEnv(res, ['STRIPE_WEBHOOK_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'])) return;
+
   let event;
 
   try {
@@ -136,6 +140,16 @@ export default async function handler(req, res) {
           console.error('Failed to update profile on checkout:', error);
         } else {
           console.log(`Checkout completed: user ${userId} → ${tier}`);
+          posthog.capture({
+            distinctId: userId,
+            event: 'subscription_activated',
+            properties: {
+              tier,
+              price_id: priceId,
+              stripe_customer_id: session.customer,
+              subscription_status: mapStatus(subscription.status),
+            },
+          });
         }
         break;
       }
@@ -170,6 +184,14 @@ export default async function handler(req, res) {
             .eq('id', profile.id);
 
           console.log(`Subscription updated: user ${profile.id} → ${tier} (${subscription.status})`);
+          posthog.capture({
+            distinctId: profile.id,
+            event: 'subscription_updated',
+            properties: {
+              tier,
+              subscription_status: mapStatus(subscription.status),
+            },
+          });
         } else {
           const priceId = subscription.items.data[0]?.price?.id;
           const tier = priceToTier(priceId);
@@ -183,6 +205,14 @@ export default async function handler(req, res) {
             .eq('id', userId);
 
           console.log(`Subscription updated: user ${userId} → ${tier} (${subscription.status})`);
+          posthog.capture({
+            distinctId: userId,
+            event: 'subscription_updated',
+            properties: {
+              tier,
+              subscription_status: mapStatus(subscription.status),
+            },
+          });
         }
         break;
       }
@@ -214,6 +244,13 @@ export default async function handler(req, res) {
             .eq('id', targetUserId);
 
           console.log(`Subscription deleted: user ${targetUserId} → free`);
+          posthog.capture({
+            distinctId: targetUserId,
+            event: 'subscription_canceled',
+            properties: {
+              stripe_customer_id: customerId,
+            },
+          });
         } else {
           console.error('Cannot find user for subscription deletion:', customerId);
         }

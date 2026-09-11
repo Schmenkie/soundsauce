@@ -120,8 +120,8 @@ export function Search({ theme, t }) {
           <MoreHorizontal className={`w-4 h-4 flex-shrink-0 animate-pulse ${t.textDimmed}`} />
         )}
         {inputValue && (
-          <button onClick={handleClear} className={`flex-shrink-0 ${t.textMuted}`}>
-            <X className="w-4 h-4" />
+          <button onClick={handleClear} aria-label="Clear search" className={`flex-shrink-0 ${t.textMuted}`}>
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         )}
       </div>
@@ -187,7 +187,7 @@ export function Search({ theme, t }) {
                         onClick={() => handleUserClick(profile.username)}
                       >
                         {profile.avatar_url ? (
-                          <img src={profile.avatar_url} alt="" className="w-10 h-10 object-cover flex-shrink-0 rounded-full" />
+                          <img src={profile.avatar_url} alt={`${profile.display_name || profile.username || 'User'} avatar`} className="w-10 h-10 object-cover flex-shrink-0 rounded-full" />
                         ) : (
                           <div className={`w-10 h-10 flex items-center justify-center text-sm font-bold flex-shrink-0 rounded-full ${
                             theme === 'dark' ? 'bg-zinc-800 text-zinc-400' : 'bg-amber-50 text-ember-600'

@@ -214,7 +214,7 @@ export function UserProfile({ theme, t }) {
         <div className="flex items-start gap-5">
           {/* Avatar */}
           {profile.avatar_url ? (
-            <img src={profile.avatar_url} alt="" className="w-20 h-20 object-cover flex-shrink-0 rounded-full" />
+            <img src={profile.avatar_url} alt={`${profile.display_name || profile.username || 'User'} avatar`} className="w-20 h-20 object-cover flex-shrink-0 rounded-full" />
           ) : (
             <div className={`w-20 h-20 flex items-center justify-center text-2xl font-bold flex-shrink-0 rounded-full ${
               theme === 'dark' ? 'bg-zinc-800 text-zinc-400' : 'bg-amber-50 text-ember-600'

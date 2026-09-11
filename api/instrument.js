@@ -18,11 +18,17 @@
  * @returns {{ results: Array<{ label: string, score: number }> }}
  */
 
+import { createClient } from '@supabase/supabase-js';
 import { rateLimit } from './_rateLimit.js';
 
 export const config = {
   maxDuration: 60,
 };
+
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL,
+  process.env.VITE_SUPABASE_ANON_KEY
+);
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
@@ -46,6 +52,18 @@ function getMimeType(url) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+  if (authError || !user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
   if (rateLimit(req, res, { limit: 20 })) return;

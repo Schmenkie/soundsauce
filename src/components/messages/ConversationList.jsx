@@ -120,7 +120,7 @@ export function ConversationList({
                 {otherUser?.avatar_url ? (
                   <img
                     src={otherUser.avatar_url}
-                    alt=""
+                    alt={`${otherUser.display_name || otherUser.username || 'User'} avatar`}
                     className="w-10 h-10 rounded-full object-cover flex-shrink-0"
                   />
                 ) : (

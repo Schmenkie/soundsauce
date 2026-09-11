@@ -38,11 +38,21 @@ export function useStemSeparation() {
   // Prediction ID for polling
   const predictionIdRef = useRef(null);
 
+  // HMAC ownership token returned by separate-stems; passed to check-stems to prevent IDOR
+  const predictionTokenRef = useRef(null);
+
   // Polling interval ref
   const pollIntervalRef = useRef(null);
 
   // Safety timeout ref (fire-and-forget prevention)
   const safetyTimeoutRef = useRef(null);
+
+  // Track whether the hook's consumer is still mounted to prevent setState after unmount
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Ref synced with stemAudioData to avoid stale closures in callbacks
   const stemAudioDataRef = useRef(stemAudioData);
@@ -73,9 +83,13 @@ export function useStemSeparation() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`/api/check-stems?id=${predictionIdRef.current}`, {
-        headers: session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {},
-      });
+      const token = predictionTokenRef.current || '';
+      const response = await fetch(
+        `/api/check-stems?id=${predictionIdRef.current}&token=${encodeURIComponent(token)}`,
+        {
+          headers: session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {},
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -83,6 +97,9 @@ export function useStemSeparation() {
       }
 
       const data = await response.json();
+
+      // Guard: component may have unmounted while the fetch was in flight
+      if (!mountedRef.current) return;
 
       // Update progress
       setProgress(data.progress || 0);
@@ -94,6 +111,7 @@ export function useStemSeparation() {
         setStatus('ready');
         setProgress(100);
         predictionIdRef.current = null;
+        predictionTokenRef.current = null;
         trackStemSeparationCompleted();
       } else if (data.status === 'failed') {
         // Separation failed
@@ -101,6 +119,7 @@ export function useStemSeparation() {
         setError(data.error || 'Stem separation failed');
         setStatus('error');
         predictionIdRef.current = null;
+        predictionTokenRef.current = null;
       }
       // Otherwise keep polling
     } catch (err) {
@@ -213,8 +232,9 @@ export function useStemSeparation() {
         throw new Error('No prediction ID returned');
       }
 
-      // Start polling
+      // Store prediction ID and ownership token for polling
       predictionIdRef.current = data.predictionId;
+      predictionTokenRef.current = data.token || '';
       setProgress(35);
 
       trackStemSeparationStarted();
@@ -230,6 +250,8 @@ export function useStemSeparation() {
         safetyTimeoutRef.current = null;
         if (pollIntervalRef.current) {
           stopPolling();
+          // Guard: skip setState if the component unmounted before the timeout fired
+          if (!mountedRef.current) return;
           setError('Stem separation timed out. The process may still be running — try refreshing the page.');
           setStatus('error');
         }
@@ -349,6 +371,7 @@ export function useStemSeparation() {
     setProgress(0);
     setError(null);
     predictionIdRef.current = null;
+    predictionTokenRef.current = null;
   }, [stopPolling]);
 
   /**
@@ -359,6 +382,7 @@ export function useStemSeparation() {
     setStatus('idle');
     setProgress(0);
     predictionIdRef.current = null;
+    predictionTokenRef.current = null;
     // Note: The Replicate prediction will continue, but we stop tracking it
   }, [stopPolling]);
 

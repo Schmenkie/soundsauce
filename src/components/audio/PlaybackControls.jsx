@@ -40,13 +40,36 @@ export function PlaybackControls({
 
         <div className="flex-1 min-w-0">
           <div
-            role="progressbar"
+            role="slider"
+            tabIndex={0}
+            aria-label="Seek audio position"
             aria-valuemin={0}
-            aria-valuemax={duration || 0}
-            aria-valuenow={playbackTime || 0}
-            aria-label="Audio progress"
+            aria-valuemax={100}
+            aria-valuenow={duration > 0 ? Math.round((playbackTime / duration) * 100) : 0}
             className={`relative h-1 overflow-hidden cursor-pointer group rounded-full ${theme === 'dark' ? 'bg-zinc-700' : 'bg-stone-200'}`}
             onClick={onSeek}
+            onKeyDown={(e) => {
+              if (!duration) return;
+              const step = 5; // seconds
+              if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                const newTime = Math.min(playbackTime + step, duration);
+                // Synthesize a click-like event with clientX set to the appropriate position
+                const el = e.currentTarget;
+                const rect = el.getBoundingClientRect();
+                const frac = newTime / duration;
+                const syntheticEvent = { clientX: rect.left + frac * rect.width, currentTarget: el };
+                onSeek(syntheticEvent);
+              } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const newTime = Math.max(playbackTime - step, 0);
+                const el = e.currentTarget;
+                const rect = el.getBoundingClientRect();
+                const frac = newTime / duration;
+                const syntheticEvent = { clientX: rect.left + frac * rect.width, currentTarget: el };
+                onSeek(syntheticEvent);
+              }
+            }}
           >
             {/* Loop region on progress bar */}
             {loopStart !== null && loopEnd !== null && duration > 0 && (

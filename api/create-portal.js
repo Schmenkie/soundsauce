@@ -40,8 +40,7 @@ const ALLOWED_ORIGINS = [
 function getSafeOrigin(reqOrigin) {
   if (!reqOrigin) return 'https://soundsauce.app';
   if (ALLOWED_ORIGINS.includes(reqOrigin)) return reqOrigin;
-  // Allow localhost in development
-  if (reqOrigin.includes('localhost')) return reqOrigin;
+  if (/^https?:\/\/localhost(:\d+)?$/.test(reqOrigin)) return reqOrigin;
   return 'https://soundsauce.app';
 }
 

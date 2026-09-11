@@ -3,6 +3,7 @@ import {
   Music, Cpu, Scissors, MousePointerClick, ArrowDown, ChevronDown, ChevronUp, Check, Loader2
 } from 'lucide-react';
 import { InstrumentIllustration } from '../ui/InstrumentIllustration';
+import { instrumentLabels as defaultInstrumentLabels } from '../../utils/constants';
 
 /**
  * Full Mix Guidance Banner — shown when the analyzer detects a full mix.
@@ -104,14 +105,165 @@ export function InstrumentSelector({
   onSeparateStems,
   onSelectRegion,
   hasStemsReady,
-  aiDetectionStatus
+  aiDetectionStatus,
+  compact = false
 }) {
   const [showInstrumentGrid, setShowInstrumentGrid] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
 
   const isFullMix = detectedInstruments?.isFullMix;
 
   if (!detectedInstruments) return null;
 
+  // Resolve the labels for the currently selected instrument
+  const labels = instrumentLabels || defaultInstrumentLabels;
+  const selectedInfo = labels[selectedInstrument] || { label: selectedInstrument, icon: 'Music' };
+
+  // Find the confidence for the selected instrument
+  const selectedDetection = detectedInstruments.detected.find(
+    item => item.instrument === selectedInstrument
+  );
+  const selectedConfidence = selectedInstrument === 'full' ? null : selectedDetection?.confidence;
+
+  // --- Compact mode ---
+  if (compact) {
+    return (
+      <div className={`mb-6 p-4 ${t.card}`}>
+        {/* Full Mix Guidance — always shown when applicable, regardless of compact mode */}
+        {isFullMix && (
+          <FullMixGuidance
+            onSeparateStems={onSeparateStems}
+            onSelectRegion={onSelectRegion}
+            hasStemsReady={hasStemsReady}
+            theme={theme}
+            t={t}
+          />
+        )}
+
+        {/* Compact instrument row */}
+        <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg ${
+          theme === 'dark'
+            ? 'bg-ember-500/15 border border-ember-500/30'
+            : 'bg-amber-50 border border-amber-200'
+        }`}>
+          <InstrumentIllustration
+            instrument={selectedInstrument}
+            size={24}
+            isDark={theme === 'dark'}
+            active
+          />
+          <span className={`text-sm font-medium ${t.text}`}>
+            {selectedInfo.label}
+          </span>
+          {selectedConfidence != null && (
+            <span className={`text-xs font-medium ${t.textMuted}`}>
+              {selectedConfidence}%
+            </span>
+          )}
+          {detectedInstruments.mlEnhanced && (
+            <span className={`flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+              theme === 'dark'
+                ? 'bg-zinc-700 text-white'
+                : 'bg-ember-600 text-white'
+            }`}>
+              <Cpu className="w-3 h-3" />
+              AI
+            </span>
+          )}
+          {(aiDetectionStatus === 'uploading' || aiDetectionStatus === 'detecting') && !detectedInstruments.mlEnhanced && (
+            <Loader2 className={`w-3.5 h-3.5 animate-spin ${t.textMuted}`} />
+          )}
+          <button
+            onClick={() => setShowGrid(prev => !prev)}
+            className={`ml-auto flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
+              theme === 'dark'
+                ? 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                : 'text-stone-500 hover:text-ember-600 hover:bg-amber-50'
+            }`}
+          >
+            Change
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showGrid ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* Expanded instrument grid in compact mode */}
+        {showGrid && (
+          <div className="mt-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+              {/* Whole Track option */}
+              <button
+                onClick={() => { onSelectInstrument('full'); setShowGrid(false); }}
+                className={`p-3 rounded-lg transition-all text-left ${
+                  selectedInstrument === 'full'
+                    ? theme === 'dark'
+                      ? 'bg-white text-black'
+                      : 'bg-ember-600 text-white shadow-lg shadow-ember-500/20'
+                    : theme === 'dark'
+                      ? 'bg-zinc-800 hover:bg-zinc-700'
+                      : 'bg-white border border-stone-200 hover:border-ember-600'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <InstrumentIllustration instrument="full" size={36} isDark={theme === 'dark'} active={selectedInstrument === 'full'} />
+                  <div className="flex items-center gap-1">
+                    {selectedInstrument === 'full' && <Check className="w-3.5 h-3.5" />}
+                  </div>
+                </div>
+                <div className="text-sm font-medium">Whole Track</div>
+                <div className="text-xs mt-1 opacity-60">General analysis</div>
+              </button>
+
+              {/* Detected instruments */}
+              {detectedInstruments.detected.filter(item => item.instrument !== 'full').map((item, i) => {
+                const info = labels[item.instrument] || { label: item.instrument, icon: 'Music' };
+                const isSelected = selectedInstrument === item.instrument;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => { onSelectInstrument(item.instrument); setShowGrid(false); }}
+                    className={`p-3 rounded-lg transition-all text-left ${
+                      isSelected
+                        ? theme === 'dark'
+                          ? 'bg-white text-black'
+                          : 'bg-ember-600 text-white shadow-lg shadow-ember-500/20'
+                        : theme === 'dark'
+                          ? 'bg-zinc-800 hover:bg-zinc-700'
+                          : 'bg-white border border-stone-200 hover:border-ember-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <InstrumentIllustration instrument={item.instrument} size={36} isDark={theme === 'dark'} active={isSelected} />
+                      <div className="flex items-center gap-1">
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                        <span className="text-xs font-medium">{item.confidence}%</span>
+                      </div>
+                    </div>
+                    <div className="text-sm font-medium">{info.label}</div>
+                    <div className={`mt-1.5 h-1 overflow-hidden ${
+                      isSelected
+                        ? (theme === 'dark' ? 'bg-black/20' : 'bg-white/30')
+                        : (theme === 'dark' ? 'bg-zinc-700' : 'bg-stone-200')
+                    }`}>
+                      <div
+                        className={`h-full ${
+                          isSelected
+                            ? (theme === 'dark' ? 'bg-black' : 'bg-white')
+                            : (theme === 'dark' ? 'bg-white' : 'bg-ember-600')
+                        }`}
+                        style={{ width: `${item.confidence}%` }}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- Default (non-compact) mode ---
   return (
     <div className={`mb-6 p-4 ${t.card}`}>
       <h4 className={`text-sm font-medium ${t.textMuted} mb-3 flex items-center gap-2`}>

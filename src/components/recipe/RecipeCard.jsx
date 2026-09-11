@@ -1,6 +1,6 @@
-import { useRef, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Clock, Music, Download, MessageSquare, Sliders, Award } from 'lucide-react';
+import { useRef, useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Clock, Music, Download, MessageSquare, Sliders, Award, Play, Square } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { sanitize } from '../../utils/sanitize';
 
@@ -10,12 +10,57 @@ import { sanitize } from '../../utils/sanitize';
  *
  * Features cursor-tracking 3D tilt, radial glow, and parallax content layers.
  */
+// Shared audio element — only one preview plays at a time across all cards
+let sharedAudio = null;
+let sharedPlayingId = null;
+let sharedListeners = new Set();
+
+function notifyListeners() {
+  sharedListeners.forEach(fn => fn());
+}
+
+function stopSharedAudio() {
+  if (sharedAudio) {
+    sharedAudio.pause();
+    sharedAudio.currentTime = 0;
+    sharedAudio = null;
+  }
+  sharedPlayingId = null;
+  notifyListeners();
+}
+
+function playSharedAudio(id, url) {
+  stopSharedAudio();
+  sharedAudio = new Audio(url);
+  sharedPlayingId = id;
+  sharedAudio.play().catch(() => {
+    sharedPlayingId = null;
+    notifyListeners();
+  });
+  sharedAudio.onended = () => {
+    sharedPlayingId = null;
+    notifyListeners();
+  };
+  notifyListeners();
+}
+
 export function RecipeCard({ recipe, theme, liked, onToggleLike }) {
+  const navigate = useNavigate();
   const cardRef = useRef(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
   // Normalized -1 to 1 position for tilt calculation
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const [, forceUpdate] = useState(0);
+
+  // Subscribe to shared audio state changes
+  useEffect(() => {
+    const listener = () => forceUpdate(n => n + 1);
+    sharedListeners.add(listener);
+    return () => sharedListeners.delete(listener);
+  }, []);
+
+  const isPlaying = sharedPlayingId === recipe.id;
 
   const isDark = theme === 'dark';
 
@@ -86,12 +131,20 @@ export function RecipeCard({ recipe, theme, liked, onToggleLike }) {
     : 'translateX(0) translateY(0)';
 
   return (
-    <Link
-      to={`/recipe/${recipe.id}`}
+    <div
       ref={cardRef}
+      role="article"
+      tabIndex={0}
       onMouseMove={handleMouseMove}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleMouseLeave}
+      onClick={() => navigate(`/recipe/${recipe.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigate(`/recipe/${recipe.id}`);
+        }
+      }}
       className={`group relative block border overflow-hidden cursor-pointer ${t.card}`}
       style={{
         borderColor: isHovered
@@ -159,8 +212,33 @@ export function RecipeCard({ recipe, theme, liked, onToggleLike }) {
           </div>
         )}
 
-        {/* Post type badge + Instrument badge + Vital badge */}
+        {/* Post type badge + Instrument badge + Vital badge + Audio preview */}
         <div className="flex items-center gap-3">
+          {recipe.audio_url && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isPlaying) {
+                  stopSharedAudio();
+                } else {
+                  playSharedAudio(recipe.id, recipe.audio_url);
+                }
+              }}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                isPlaying
+                  ? (isDark ? 'bg-ember-500/20 text-ember-400' : 'bg-amber-100 text-ember-700')
+                  : (isDark ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200')
+              }`}
+              aria-label={isPlaying ? 'Stop preview' : 'Preview sound'}
+            >
+              {isPlaying ? (
+                <Square className="w-3 h-3" />
+              ) : (
+                <Play className="w-3 h-3" />
+              )}
+              {isPlaying ? 'Playing' : 'Preview'}
+            </button>
+          )}
           {recipe.post_type === 'preset' ? (
             <div className="flex items-center gap-1.5">
               <Sliders className={`w-3.5 h-3.5 ${t.accent}`} />
@@ -204,12 +282,14 @@ export function RecipeCard({ recipe, theme, liked, onToggleLike }) {
           </div>
           <div className="flex items-center gap-3">
             {onToggleLike && (
-              <LikeButton
-                liked={liked}
-                likeCount={recipe.like_count || 0}
-                onToggle={() => onToggleLike(recipe.id)}
-                theme={theme}
-              />
+              <div onClick={(e) => e.stopPropagation()}>
+                <LikeButton
+                  liked={liked}
+                  likeCount={recipe.like_count || 0}
+                  onToggle={() => onToggleLike(recipe.id)}
+                  theme={theme}
+                />
+              </div>
             )}
             {(recipe.comment_count > 0) && (
               <div className="flex items-center gap-1">
@@ -230,7 +310,7 @@ export function RecipeCard({ recipe, theme, liked, onToggleLike }) {
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 

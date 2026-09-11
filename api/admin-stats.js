@@ -202,7 +202,7 @@ async function handleOverview(res) {
 
 async function handleUsers(req, res) {
   const range = req.query.range || '30d';
-  const query = req.query.query || '';
+  const query = (req.query.query || '').slice(0, 100);
   const cutoffDate = getCutoffDate(range);
 
   // If searching for a user, return search results

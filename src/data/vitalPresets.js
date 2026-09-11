@@ -101,6 +101,168 @@ export function applyKickLFOEnvelopes(preset) {
 }
 
 // =============================================================================
+// LFO Waveform Shapes — used by CATEGORY_MODULATIONS
+// Vital stores LFO shapes as point arrays in settings.lfos[]
+// Format: { name, num_points, points: [x0,y0, x1,y1, ...], powers: [...], smooth }
+// =============================================================================
+
+export const LFO_SHAPES = {
+  // Sine — smooth, organic modulation (pads, vibrato, tremolo)
+  sine: {
+    name: 'Sine', num_points: 3,
+    points: [0.0, 0.5, 0.5, 1.0, 1.0, 0.5],
+    powers: [2.0, -2.0, 0.0], smooth: true
+  },
+  // Saw down — rhythmic sweep, filter wobble (bass, dubstep)
+  saw_down: {
+    name: 'Saw', num_points: 3,
+    points: [0.0, 1.0, 0.999, 0.0, 1.0, 1.0],
+    powers: [0.0, 0.0, 0.0], smooth: false
+  },
+  // Square — hard on/off gating (trance gates, choppy FX)
+  square: {
+    name: 'Square', num_points: 4,
+    points: [0.0, 1.0, 0.5, 1.0, 0.5, 0.0, 1.0, 0.0],
+    powers: [0.0, 0.0, 0.0, 0.0], smooth: false
+  },
+  // Triangle — default Vital shape (gentle, balanced)
+  triangle: {
+    name: 'Triangle', num_points: 3,
+    points: [0.0, 1.0, 0.5, 0.0, 1.0, 1.0],
+    powers: [0.0, 0.0, 0.0], smooth: false
+  },
+  // Smooth ramp — gentle filter sweep (keys, guitar)
+  smooth_ramp: {
+    name: 'Smooth Ramp', num_points: 3,
+    points: [0.0, 0.0, 0.5, 1.0, 1.0, 0.0],
+    powers: [1.5, -1.5, 0.0], smooth: true
+  },
+};
+
+// =============================================================================
+// Category Modulation Routing — connects ENV 2 and LFO 1 to destinations
+// Without modulation routing, ENV 2 and LFO 1 parameters have NO effect
+// in Vital even though the values are set. This is the critical missing piece.
+// =============================================================================
+
+/**
+ * Default modulation routes per instrument category.
+ * Each category defines which modulations to set up.
+ * Uses modulation slots 4-6 (1-3 reserved for kick LFO presets).
+ */
+export const CATEGORY_MODULATIONS = {
+  bass: {
+    lfo1Shape: 'saw_down',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.35, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'filter_1_cutoff', amount: 0.25, bipolar: 1 },
+    ]
+  },
+  lead: {
+    lfo1Shape: 'triangle',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.4, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'osc_1_tune', amount: 0.08, bipolar: 1 },
+    ]
+  },
+  pad: {
+    lfo1Shape: 'sine',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.45, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'filter_1_cutoff', amount: 0.15, bipolar: 1 },
+      { slot: 6, source: 'lfo_1', destination: 'osc_1_level', amount: 0.06, bipolar: 1 },
+    ]
+  },
+  pluck: {
+    lfo1Shape: 'triangle',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.5, bipolar: 0 },
+    ]
+  },
+  kick: {
+    // Kick uses applyKickLFOEnvelopes() for slots 1-3 — no additional routing needed
+    lfo1Shape: null,
+    routes: []
+  },
+  drums: {
+    lfo1Shape: 'square',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.5, bipolar: 0 },
+    ]
+  },
+  keys: {
+    lfo1Shape: 'sine',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.3, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'osc_1_level', amount: 0.04, bipolar: 1 },
+    ]
+  },
+  guitar: {
+    lfo1Shape: 'smooth_ramp',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.35, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'osc_1_tune', amount: 0.06, bipolar: 1 },
+    ]
+  },
+  brass: {
+    lfo1Shape: 'sine',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.4, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'osc_1_tune', amount: 0.1, bipolar: 1 },
+    ]
+  },
+  woodwind: {
+    lfo1Shape: 'sine',
+    routes: [
+      { slot: 4, source: 'env_2', destination: 'filter_1_cutoff', amount: 0.35, bipolar: 0 },
+      { slot: 5, source: 'lfo_1', destination: 'osc_1_tune', amount: 0.12, bipolar: 1 },
+    ]
+  },
+};
+
+/**
+ * Apply category-specific modulation routing and LFO shapes to a preset.
+ * This connects ENV 2 → filter and LFO 1 → destinations so they actually
+ * produce audible changes in Vital (without routing, they do nothing).
+ */
+export function applyCategoryModulations(preset, category) {
+  const catMod = CATEGORY_MODULATIONS[category];
+  if (!catMod) return;
+
+  // Set LFO 1 waveform shape
+  if (catMod.lfo1Shape && LFO_SHAPES[catMod.lfo1Shape]) {
+    if (!preset.settings.lfos) preset.settings.lfos = [];
+    while (preset.settings.lfos.length < 8) {
+      preset.settings.lfos.push({ name: 'Triangle', num_points: 3, points: [0.0, 1.0, 0.5, 0.0, 1.0, 1.0], powers: [0.0, 0.0, 0.0], smooth: false });
+    }
+    preset.settings.lfos[0] = LFO_SHAPES[catMod.lfo1Shape];
+  }
+
+  // Set modulation routes
+  if (catMod.routes.length === 0) return;
+
+  if (!preset.settings.modulations) preset.settings.modulations = [];
+  while (preset.settings.modulations.length < 64) {
+    preset.settings.modulations.push({ source: '', destination: '' });
+  }
+
+  for (const route of catMod.routes) {
+    const idx = route.slot - 1;
+    if (idx >= 0 && idx < 64) {
+      preset.settings.modulations[idx] = {
+        source: route.source,
+        destination: route.destination,
+      };
+      preset.settings[`modulation_${route.slot}_amount`] = route.amount;
+      preset.settings[`modulation_${route.slot}_bipolar`] = route.bipolar ?? 0;
+      preset.settings[`modulation_${route.slot}_bypass`] = 0;
+      preset.settings[`modulation_${route.slot}_power`] = 0;
+      preset.settings[`modulation_${route.slot}_stereo`] = 0;
+    }
+  }
+}
+
+// =============================================================================
 // Preset Categories
 // =============================================================================
 
@@ -118,6 +280,134 @@ export const PRESET_CATEGORIES = [
 ];
 
 // =============================================================================
+// Category Visual Profiles — env_2 + LFO 1 defaults per category
+// Applied in buildVitalPreset() to make presets visually distinct in Vital's UI.
+// Curated preset settings and analysis overrides take priority over these.
+// =============================================================================
+
+export const CATEGORY_VISUAL_PROFILES = {
+  bass: {
+    // Filter envelope: fast open, medium decay to warm sustain
+    env_2_attack: 0.02, env_2_decay: 0.6, env_2_sustain: 0.35, env_2_release: 0.3,
+    env_2_attack_power: 0.0, env_2_decay_power: -1.5, env_2_release_power: -2.0,
+    // LFO: slow subtle wobble
+    lfo_1_frequency: 0.5, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -5.0,
+    // Effects: light saturation for warmth, subtle compression, low-end EQ boost
+    distortion_on: 1.0, distortion_drive: 3.0, distortion_mix: 0.15, distortion_type: 0.0,
+    compressor_on: 1.0, compressor_mix: 1.0, compressor_attack: 0.3, compressor_release: 0.4,
+    eq_on: 1.0, eq_low_gain: 3.0, eq_low_cutoff: 60.0, eq_high_gain: -4.0, eq_high_cutoff: 100.0,
+  },
+  lead: {
+    // Filter envelope: instant attack, short decay, bright sustain
+    env_2_attack: 0.01, env_2_decay: 0.25, env_2_sustain: 0.7, env_2_release: 0.4,
+    env_2_attack_power: 0.0, env_2_decay_power: -2.5, env_2_release_power: -1.5,
+    // LFO: moderate rate for vibrato feel
+    lfo_1_frequency: 4.5, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -4.0,
+    // Effects: short delay for width, light reverb, presence EQ
+    delay_on: 1.0, delay_dry_wet: 0.15, delay_feedback: 0.25, delay_sync: 1.0, delay_tempo: 9.0,
+    reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3, reverb_decay_time: 0.0,
+    eq_on: 1.0, eq_band_gain: 2.0, eq_band_cutoff: 90.0, eq_high_gain: 3.0, eq_high_cutoff: 100.0,
+  },
+  pad: {
+    // Filter envelope: slow swell, long decay, high sustain
+    env_2_attack: 0.8, env_2_decay: 1.5, env_2_sustain: 0.6, env_2_release: 1.2,
+    env_2_attack_power: -1.5, env_2_decay_power: -1.0, env_2_release_power: -1.5,
+    // LFO: very slow sweep
+    lfo_1_frequency: 0.15, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -3.0,
+    // Effects: lush reverb, chorus for width, gentle EQ
+    reverb_on: 1.0, reverb_dry_wet: 0.45, reverb_size: 0.7, reverb_decay_time: 2.5,
+    reverb_chorus_amount: 0.4, reverb_pre_high_cutoff: 100.0,
+    chorus_on: 1.0, chorus_dry_wet: 0.25, chorus_voices: 4.0, chorus_mod_depth: 0.5,
+    eq_on: 1.0, eq_low_gain: -2.0, eq_high_gain: 2.0, eq_high_cutoff: 95.0,
+  },
+  pluck: {
+    // Filter envelope: instant attack, fast decay, no sustain (percussive pluck)
+    env_2_attack: 0.0, env_2_decay: 0.15, env_2_sustain: 0.0, env_2_release: 0.1,
+    env_2_attack_power: 0.0, env_2_decay_power: -3.0, env_2_release_power: -3.0,
+    // LFO: medium rate, adds movement to repeating plucks
+    lfo_1_frequency: 2.0, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -5.0,
+    // Effects: short reverb for space, delay for rhythmic echo
+    reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.25, reverb_decay_time: 0.0,
+    delay_on: 1.0, delay_dry_wet: 0.2, delay_feedback: 0.3, delay_sync: 1.0, delay_tempo: 9.0,
+    compressor_on: 1.0, compressor_mix: 1.0, compressor_attack: 0.2, compressor_release: 0.3,
+  },
+  kick: {
+    // Kick LFO handled by applyKickLFOEnvelopes() — env_2 for sub body
+    env_2_attack: 0.0, env_2_decay: 0.08, env_2_sustain: 0.0, env_2_release: 0.05,
+    env_2_attack_power: 0.0, env_2_decay_power: 5.0, env_2_release_power: -3.0,
+    // LFO set by applyKickLFOEnvelopes, don't override
+    // Effects: heavy distortion for punch, compression, sub-focused EQ
+    distortion_on: 1.0, distortion_drive: 8.0, distortion_mix: 0.3, distortion_type: 0.0,
+    compressor_on: 1.0, compressor_mix: 1.0, compressor_attack: 0.1, compressor_release: 0.2,
+    eq_on: 1.0, eq_low_gain: 5.0, eq_low_cutoff: 50.0, eq_high_gain: -8.0, eq_high_cutoff: 90.0,
+  },
+  drums: {
+    // Filter envelope: instant attack, short decay (snappy)
+    env_2_attack: 0.0, env_2_decay: 0.12, env_2_sustain: 0.05, env_2_release: 0.08,
+    env_2_attack_power: 0.0, env_2_decay_power: -3.5, env_2_release_power: -3.0,
+    // LFO: fast for hi-hat shimmer
+    lfo_1_frequency: 8.0, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 0.0, lfo_1_smooth_time: -7.0,
+    // Effects: compression for snap, distortion for bite, scooped EQ
+    compressor_on: 1.0, compressor_mix: 1.0, compressor_attack: 0.1, compressor_release: 0.2,
+    distortion_on: 1.0, distortion_drive: 5.0, distortion_mix: 0.2, distortion_type: 0.0,
+    eq_on: 1.0, eq_low_gain: 2.0, eq_band_gain: -2.0, eq_high_gain: 4.0, eq_high_cutoff: 100.0,
+  },
+  keys: {
+    // Filter envelope: fast attack, medium decay, warm sustain
+    env_2_attack: 0.01, env_2_decay: 0.4, env_2_sustain: 0.45, env_2_release: 0.5,
+    env_2_attack_power: 0.0, env_2_decay_power: -2.0, env_2_release_power: -2.0,
+    // LFO: slow gentle tremolo
+    lfo_1_frequency: 1.5, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -5.0,
+    // Effects: medium reverb for room feel, subtle chorus
+    reverb_on: 1.0, reverb_dry_wet: 0.25, reverb_size: 0.4, reverb_decay_time: 0.5,
+    chorus_on: 1.0, chorus_dry_wet: 0.1, chorus_voices: 2.0, chorus_mod_depth: 0.3,
+    eq_on: 1.0, eq_band_gain: 1.5, eq_band_cutoff: 85.0,
+  },
+  guitar: {
+    // Filter envelope: fast attack, medium-long decay (string resonance)
+    env_2_attack: 0.01, env_2_decay: 0.5, env_2_sustain: 0.3, env_2_release: 0.4,
+    env_2_attack_power: 0.0, env_2_decay_power: -1.0, env_2_release_power: -1.5,
+    // LFO: moderate for tremolo/vibrato
+    lfo_1_frequency: 5.0, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -4.0,
+    // Effects: room reverb, light chorus for shimmer, mid-focused EQ
+    reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.35, reverb_decay_time: 0.3,
+    chorus_on: 1.0, chorus_dry_wet: 0.12, chorus_voices: 2.0, chorus_mod_depth: 0.3,
+    eq_on: 1.0, eq_band_gain: 3.0, eq_band_cutoff: 85.0, eq_high_gain: 2.0,
+  },
+  brass: {
+    // Filter envelope: medium attack, slow decay, high sustain (bright and sustained)
+    env_2_attack: 0.15, env_2_decay: 0.8, env_2_sustain: 0.65, env_2_release: 0.6,
+    env_2_attack_power: -1.0, env_2_decay_power: -1.0, env_2_release_power: -2.0,
+    // LFO: slow vibrato
+    lfo_1_frequency: 5.5, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -4.0,
+    // Effects: room reverb, light saturation for edge, bright EQ
+    reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.4, reverb_decay_time: 0.5,
+    distortion_on: 1.0, distortion_drive: 2.0, distortion_mix: 0.1, distortion_type: 0.0,
+    eq_on: 1.0, eq_band_gain: 2.0, eq_band_cutoff: 90.0, eq_high_gain: 3.0, eq_high_cutoff: 105.0,
+  },
+  woodwind: {
+    // Filter envelope: medium attack, medium decay, moderate sustain
+    env_2_attack: 0.1, env_2_decay: 0.5, env_2_sustain: 0.5, env_2_release: 0.5,
+    env_2_attack_power: -0.5, env_2_decay_power: -1.5, env_2_release_power: -2.0,
+    // LFO: medium vibrato
+    lfo_1_frequency: 5.0, lfo_1_sync: 0.0, lfo_1_sync_type: 0.0,
+    lfo_1_smooth_mode: 1.0, lfo_1_smooth_time: -4.0,
+    // Effects: airy reverb, subtle phaser for breathiness
+    reverb_on: 1.0, reverb_dry_wet: 0.3, reverb_size: 0.5, reverb_decay_time: 1.0,
+    phaser_on: 1.0, phaser_dry_wet: 0.15, phaser_feedback: 0.3, phaser_mod_depth: 12.0,
+    eq_on: 1.0, eq_low_gain: -3.0, eq_high_gain: 2.0, eq_high_cutoff: 100.0,
+  },
+};
+
+// =============================================================================
 // Tuning Parameters (user-adjustable sliders)
 // =============================================================================
 
@@ -132,6 +422,28 @@ export const TUNING_PARAMS = [
   { id: 'unison_detune',     label: 'Unison Detune',     vitalKey: 'osc_1_unison_detune',   min: 0,  max: 10,  step: 0.1,  display: 'value',   group: 'oscillator', description: 'How far apart the voices are tuned. Higher = more chorus-like' },
   { id: 'reverb',            label: 'Reverb',            vitalKey: 'reverb_dry_wet',        min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'effects',    linkedToggle: 'reverb_on', description: 'Adds space and depth. Higher = bigger room' },
   { id: 'chorus',            label: 'Chorus',            vitalKey: 'chorus_dry_wet',        min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'effects',    linkedToggle: 'chorus_on', description: 'Thickens the sound with slight detuning' },
+
+  // --- Oscillator ---
+  { id: 'wave_frame',        label: 'Wave Shape',        vitalKey: 'osc_1_wave_frame',      min: 0,  max: 127, step: 1,    display: 'integer', group: 'oscillator', description: 'Sweeps the wavetable. 0=sine, 32=triangle, 64=saw, 96=square, 127=pulse' },
+  { id: 'stereo_spread',     label: 'Stereo Spread',     vitalKey: 'osc_1_stereo_spread',   min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'oscillator', description: 'Pans unison voices across the stereo field for width' },
+  { id: 'osc_2_level',       label: 'OSC 2 Level',       vitalKey: 'osc_2_level',           min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'oscillator', linkedToggle: 'osc_2_on', description: 'Volume of the second oscillator. Adds body or sub layer' },
+  { id: 'osc_2_transpose',   label: 'OSC 2 Tune',       vitalKey: 'osc_2_transpose',       min: -48, max: 48, step: 1,    display: 'semitones', group: 'oscillator', description: 'Pitch offset of OSC 2 in semitones. -12 = sub octave, +7 = fifth' },
+
+  // --- Filter ---
+  { id: 'filter_drive',      label: 'Filter Drive',      vitalKey: 'filter_1_drive',        min: 0,  max: 20,  step: 0.1,  display: 'value',   group: 'filter',     description: 'Saturates the filter input. Adds warmth and grit at higher settings' },
+
+  // --- Effects ---
+  { id: 'distortion_drive',  label: 'Distortion',        vitalKey: 'distortion_drive',      min: 0,  max: 20,  step: 0.1,  display: 'value',   group: 'effects',    linkedToggle: 'distortion_on', description: 'Amount of distortion/saturation. Essential for 808s and leads' },
+  { id: 'distortion_mix',    label: 'Dist Mix',          vitalKey: 'distortion_mix',        min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'effects',    description: 'Blend between clean and distorted signal' },
+  { id: 'delay_mix',         label: 'Delay',             vitalKey: 'delay_dry_wet',         min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'effects',    linkedToggle: 'delay_on', description: 'Echo/delay effect. Adds rhythm and space to leads and plucks' },
+  { id: 'reverb_size',       label: 'Reverb Size',       vitalKey: 'reverb_size',           min: 0,  max: 1,   step: 0.01, display: 'percent', group: 'effects',    description: 'Size of the reverb space. Small = room, large = hall' },
+
+  // --- Modulation ---
+  { id: 'env_2_decay',       label: 'Filter Env',        vitalKey: 'env_2_decay',           min: 0,  max: 4,   step: 0.01, display: 'seconds', group: 'modulation', description: 'Filter envelope decay — controls how fast the filter sweeps. Key for acid bass and plucks' },
+  { id: 'lfo_rate',          label: 'LFO Rate',          vitalKey: 'lfo_1_frequency',       min: 0.1, max: 20, step: 0.1,  display: 'hz',      group: 'modulation', description: 'Speed of the LFO. Slow = gentle movement, fast = wobble/vibrato' },
+
+  // --- Performance ---
+  { id: 'glide',             label: 'Glide',             vitalKey: 'portamento_time',       min: 0,  max: 1,   step: 0.01, display: 'seconds', group: 'performance', description: 'Pitch slides between notes. Essential for 808 slides and smooth leads' },
 ];
 
 // =============================================================================
@@ -160,7 +472,7 @@ export const CURATED_PRESETS = [
       osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 0,
       osc_1_unison_voices: 1.0,
       osc_2_on: 0.0,
-      filter_1_on: 1.0, filter_1_cutoff: 60, filter_1_resonance: 0.1,
+      filter_1_on: 1.0, filter_1_cutoff: 54, filter_1_resonance: 0.05,
       filter_1_model: 3, filter_1_style: 1.0,
       env_1_attack: 0.005, env_1_decay: 0.2, env_1_sustain: 0.85, env_1_release: 0.1,
       env_1_attack_power: 1.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
@@ -187,7 +499,7 @@ export const CURATED_PRESETS = [
       osc_1_unison_voices: 1.0, osc_1_unison_detune: 0, osc_1_stereo_spread: 0,
       osc_2_on: 1.0, osc_2_level: 0.5, osc_2_wave_frame: 0,
       osc_2_transpose: -12, osc_2_unison_voices: 1.0,
-      filter_1_on: 1.0, filter_1_cutoff: 80, filter_1_resonance: 0.25,
+      filter_1_on: 1.0, filter_1_cutoff: 90, filter_1_resonance: 0.25,
       filter_1_model: 3, filter_1_style: 1.0,
       env_1_attack: 0.005, env_1_decay: 0.3, env_1_sustain: 0.7, env_1_release: 0.15,
       env_1_attack_power: 2.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
@@ -215,7 +527,7 @@ export const CURATED_PRESETS = [
       osc_1_unison_voices: 3.0, osc_1_unison_detune: 3.5, osc_1_stereo_spread: 0.5,
       osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 64,
       osc_2_transpose: -12, osc_2_unison_voices: 2.0, osc_2_unison_detune: 2.0,
-      filter_1_on: 1.0, filter_1_cutoff: 70, filter_1_resonance: 0.3,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.35,
       filter_1_model: 3, filter_1_style: 1.0,
       env_1_attack: 0.01, env_1_decay: 0.4, env_1_sustain: 0.65, env_1_release: 0.2,
       env_1_attack_power: 1.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
@@ -241,9 +553,9 @@ export const CURATED_PRESETS = [
       osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
       osc_1_unison_voices: 1.0,
       osc_2_on: 0.0,
-      filter_1_on: 1.0, filter_1_cutoff: 55, filter_1_resonance: 0.65,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.7,
       filter_1_model: 4, filter_1_style: 1.0,
-      env_1_attack: 0.001, env_1_decay: 0.25, env_1_sustain: 0.3, env_1_release: 0.1,
+      env_1_attack: 0.001, env_1_decay: 0.15, env_1_sustain: 0.2, env_1_release: 0.08,
       env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.0,
       distortion_on: 1.0, distortion_drive: 8.0, distortion_mix: 0.2,
     },
@@ -268,9 +580,9 @@ export const CURATED_PRESETS = [
       osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 0,
       osc_1_unison_voices: 1.0,
       osc_2_on: 0.0,
-      filter_1_on: 1.0, filter_1_cutoff: 65, filter_1_resonance: 0.15,
+      filter_1_on: 1.0, filter_1_cutoff: 56, filter_1_resonance: 0.15,
       filter_1_model: 3, filter_1_style: 1.0,
-      env_1_attack: 0.001, env_1_decay: 1.5, env_1_sustain: 0.4, env_1_release: 0.3,
+      env_1_attack: 0.001, env_1_decay: 2.0, env_1_sustain: 0.3, env_1_release: 0.5,
       env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
       distortion_on: 1.0, distortion_drive: 5.0, distortion_mix: 0.15,
       eq_on: 1.0, eq_low_gain: 4.0, eq_high_gain: -8.0,
@@ -297,7 +609,7 @@ export const CURATED_PRESETS = [
       osc_1_unison_voices: 2.0, osc_1_unison_detune: 2.0, osc_1_stereo_spread: 0.3,
       osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 96,
       osc_2_transpose: 0, osc_2_unison_voices: 1.0,
-      filter_1_on: 1.0, filter_1_cutoff: 60, filter_1_resonance: 0.5,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.5,
       filter_1_model: 4, filter_1_style: 1.0,
       env_1_attack: 0.005, env_1_decay: 0.3, env_1_sustain: 0.7, env_1_release: 0.15,
       env_1_attack_power: 1.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
@@ -579,7 +891,7 @@ export const CURATED_PRESETS = [
       osc_1_unison_voices: 4.0, osc_1_unison_detune: 4.5, osc_1_stereo_spread: 0.7,
       osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 32,
       osc_2_transpose: -12, osc_2_unison_voices: 2.0, osc_2_unison_detune: 3.0,
-      filter_1_on: 1.0, filter_1_cutoff: 55, filter_1_resonance: 0.3,
+      filter_1_on: 1.0, filter_1_cutoff: 68, filter_1_resonance: 0.3,
       filter_1_model: 0, filter_1_style: 0.0,
       env_1_attack: 0.5, env_1_decay: 0.8, env_1_sustain: 0.7, env_1_release: 1.5,
       env_1_attack_power: -2.5, env_1_decay_power: -1.0, env_1_release_power: -3.0,
@@ -693,7 +1005,7 @@ export const CURATED_PRESETS = [
       osc_1_unison_voices: 5.0, osc_1_unison_detune: 5.5, osc_1_stereo_spread: 0.9,
       osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 32,
       osc_2_transpose: -12, osc_2_unison_voices: 3.0, osc_2_unison_detune: 4.0, osc_2_stereo_spread: 0.6,
-      filter_1_on: 1.0, filter_1_cutoff: 65, filter_1_resonance: 0.35,
+      filter_1_on: 1.0, filter_1_cutoff: 74, filter_1_resonance: 0.35,
       filter_1_model: 0, filter_1_style: 0.0,
       env_1_attack: 0.6, env_1_decay: 0.7, env_1_sustain: 0.7, env_1_release: 1.5,
       env_1_attack_power: -2.0, env_1_decay_power: -1.0, env_1_release_power: -2.5,
@@ -1300,6 +1612,1706 @@ export const CURATED_PRESETS = [
       reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3,
     },
   },
+
+  // =========================================================================
+  // Bass — new presets
+  // =========================================================================
+  {
+    id: 'rubber_bass',
+    name: 'Rubber Bass',
+    category: 'bass',
+    description: 'Bouncy, elastic bass with pitch modulation and quick decay.',
+    matchReason: 'Pitch bend on attack gives a rubbery bounce; tight envelope keeps it punchy.',
+    tags: ['rubber', 'bouncy', 'elastic'],
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.3, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 60, max: 350, weight: 0.8 },
+      sustain: { min: 0.05, max: 0.35, weight: 0.9 },
+      filterCutoff: { min: 80, max: 400, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 32,
+      osc_2_transpose: -12,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.18, env_1_sustain: 0.15, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
+    },
+  },
+  {
+    id: 'talking_bass',
+    name: 'Talking Bass',
+    category: 'bass',
+    description: 'Wah-style bass with resonant filter sweep creating vowel-like formants.',
+    matchReason: 'High resonance filter with envelope modulation creates vocal-like wah movement.',
+    tags: ['wah', 'talking', 'formant'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.45, weight: 0.7 },
+      waveformTypes: ['saw', 'square'],
+      attack: { min: 0, max: 10, weight: 0.7 },
+      spectralCentroid: { min: 150, max: 700, weight: 0.8 },
+      sustain: { min: 0.15, max: 0.5, weight: 0.7 },
+      filterCutoff: { min: 100, max: 500, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.5, osc_2_wave_frame: 96,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 60, filter_1_resonance: 0.65,
+      filter_1_model: 4, filter_1_style: 1.0,
+      env_1_attack: 0.001, env_1_decay: 0.2, env_1_sustain: 0.3, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -1.5,
+      env_2_attack: 0.01, env_2_decay: 0.25, env_2_sustain: 0.1, env_2_release: 0.15,
+    },
+  },
+  {
+    id: 'deep_house_bass',
+    name: 'Deep House Bass',
+    category: 'bass',
+    description: 'Warm, round bass with subtle saturation. Classic deep/tech house foundation.',
+    matchReason: 'Low-passed saw with moderate sustain sits warmly in a house mix without dominating.',
+    tags: ['deep house', 'warm', 'round'],
+    featureProfile: {
+      brightness: { min: 0.03, max: 0.2, weight: 0.9 },
+      waveformTypes: ['saw', 'sine'],
+      attack: { min: 0, max: 12, weight: 0.7 },
+      spectralCentroid: { min: 60, max: 300, weight: 0.8 },
+      sustain: { min: 0.3, max: 0.7, weight: 0.8 },
+      filterCutoff: { min: 60, max: 300, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 62, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.003, env_1_decay: 0.25, env_1_sustain: 0.5, env_1_release: 0.12,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      distortion_on: 1.0, distortion_drive: 5.0, distortion_mix: 0.1,
+    },
+  },
+  {
+    id: 'neuro_bass',
+    name: 'Neuro Bass',
+    category: 'bass',
+    description: 'Aggressive, modulated bass with heavy distortion and movement. DnB/dubstep staple.',
+    matchReason: 'Distorted saw with fast filter modulation creates the characteristic growling timbre.',
+    tags: ['neuro', 'dnb', 'aggressive'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.65, weight: 0.7 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 0, max: 10, weight: 0.6 },
+      spectralCentroid: { min: 200, max: 1200, weight: 0.7 },
+      sustain: { min: 0.2, max: 0.6, weight: 0.7 },
+      filterCutoff: { min: 150, max: 800, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 3.0, osc_1_unison_detune: 2.5,
+      osc_2_on: 1.0, osc_2_level: 0.6, osc_2_wave_frame: 96,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 75, filter_1_resonance: 0.45,
+      filter_1_model: 4, filter_1_style: 1.0,
+      env_1_attack: 0.001, env_1_decay: 0.15, env_1_sustain: 0.4, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.0,
+      distortion_on: 1.0, distortion_drive: 20.0, distortion_mix: 0.4,
+    },
+  },
+  {
+    id: 'moog_bass',
+    name: 'Moog-Style Bass',
+    category: 'bass',
+    description: 'Classic analog ladder filter bass. Fat, warm, and gritty.',
+    matchReason: 'Analog-modeled ladder filter with moderate resonance produces the classic Moog warmth.',
+    tags: ['moog', 'analog', 'ladder'],
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.3, weight: 0.8 },
+      waveformTypes: ['saw', 'square'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 80, max: 400, weight: 0.8 },
+      sustain: { min: 0.3, max: 0.7, weight: 0.7 },
+      filterCutoff: { min: 80, max: 350, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.6, osc_2_wave_frame: 96,
+      osc_2_transpose: -12,
+      filter_1_on: 1.0, filter_1_cutoff: 65, filter_1_resonance: 0.35,
+      filter_1_model: 3, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.2, env_1_sustain: 0.55, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      distortion_on: 1.0, distortion_drive: 6.0, distortion_mix: 0.12,
+    },
+  },
+  {
+    id: 'distorted_bass',
+    name: 'Distorted Bass',
+    category: 'bass',
+    description: 'Heavily saturated bass with harmonic overtones. Aggressive and present.',
+    matchReason: 'High-drive distortion before the filter generates rich harmonics that cut through a mix.',
+    tags: ['distorted', 'saturated', 'aggressive'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw', 'square', 'complex'],
+      attack: { min: 0, max: 10, weight: 0.7 },
+      spectralCentroid: { min: 150, max: 900, weight: 0.7 },
+      sustain: { min: 0.2, max: 0.6, weight: 0.7 },
+      filterCutoff: { min: 100, max: 600, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.18, env_1_sustain: 0.45, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
+      distortion_on: 1.0, distortion_drive: 30.0, distortion_mix: 0.5,
+    },
+  },
+
+  // =========================================================================
+  // Lead — new presets
+  // =========================================================================
+  {
+    id: 'detuned_saw_lead',
+    name: 'Detuned Saw Lead',
+    category: 'lead',
+    description: 'Thick, wide lead from multiple detuned saw oscillators. Classic EDM lead.',
+    matchReason: 'Unison detuning creates stereo width and presence without needing effects.',
+    tags: ['detuned', 'unison', 'thick'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.7, weight: 0.8 },
+      waveformTypes: ['saw'],
+      attack: { min: 0, max: 15, weight: 0.7 },
+      spectralCentroid: { min: 800, max: 3000, weight: 0.7 },
+      sustain: { min: 0.5, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 500, max: 3000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 5.0, osc_1_unison_detune: 4.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 90, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.005, env_1_decay: 0.3, env_1_sustain: 0.75, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'trance_lead',
+    name: 'Trance Lead',
+    category: 'lead',
+    description: 'Bright, soaring lead with supersaw character. Uplifting trance melodies.',
+    matchReason: 'Wide unison and open filter give the characteristic bright, emotional trance sound.',
+    tags: ['trance', 'supersaw', 'uplifting'],
+    featureProfile: {
+      brightness: { min: 0.4, max: 0.8, weight: 0.8 },
+      waveformTypes: ['saw'],
+      attack: { min: 0, max: 20, weight: 0.6 },
+      spectralCentroid: { min: 1000, max: 4000, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 800, max: 5000, weight: 0.6 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 7.0, osc_1_unison_detune: 5.5,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 64,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.01, env_1_decay: 0.4, env_1_sustain: 0.8, env_1_release: 0.3,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      chorus_on: 1.0, chorus_dry_wet: 0.3, chorus_frequency: 2.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.5,
+    },
+  },
+  {
+    id: 'whistle_lead',
+    name: 'Whistle Synth',
+    category: 'lead',
+    description: 'Pure, breathy lead resembling a whistle. Clean and simple.',
+    matchReason: 'Near-sine waveform with gentle filter creates a clean, whistling tone.',
+    tags: ['whistle', 'clean', 'simple'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.35, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 5, max: 40, weight: 0.7 },
+      spectralCentroid: { min: 800, max: 2500, weight: 0.8 },
+      sustain: { min: 0.6, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 600, max: 2000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 88, filter_1_resonance: 0.25,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.03, env_1_decay: 0.2, env_1_sustain: 0.85, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.35,
+    },
+  },
+  {
+    id: 'portamento_lead',
+    name: 'Portamento Lead',
+    category: 'lead',
+    description: 'Smooth, gliding lead with pitch slide between notes. R&B and future bass.',
+    matchReason: 'Monophonic saw with portamento glides smoothly between pitches.',
+    tags: ['portamento', 'glide', 'smooth'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw', 'triangle'],
+      attack: { min: 0, max: 15, weight: 0.7 },
+      spectralCentroid: { min: 500, max: 2000, weight: 0.7 },
+      sustain: { min: 0.5, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 2.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 82, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.008, env_1_decay: 0.25, env_1_sustain: 0.7, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      polyphony: 1, portamento_time: 0.08,
+    },
+  },
+  {
+    id: 'sync_lead',
+    name: 'Sync Lead',
+    category: 'lead',
+    description: 'Hard-sync style lead with metallic, cutting harmonics.',
+    matchReason: 'Saw and square layered with offset tuning create a hard-sync-like tearing timbre.',
+    tags: ['sync', 'metallic', 'cutting'],
+    featureProfile: {
+      brightness: { min: 0.35, max: 0.75, weight: 0.8 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 0, max: 10, weight: 0.7 },
+      spectralCentroid: { min: 1000, max: 4000, weight: 0.8 },
+      sustain: { min: 0.5, max: 0.85, weight: 0.6 },
+      filterCutoff: { min: 600, max: 4000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.6, osc_2_wave_frame: 96,
+      osc_2_transpose: 7,
+      filter_1_on: 1.0, filter_1_cutoff: 95, filter_1_resonance: 0.12,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.2, env_1_sustain: 0.7, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'pwm_lead',
+    name: 'PWM Lead',
+    category: 'lead',
+    description: 'Pulse width modulation lead with hollow, nasal character that shifts over time.',
+    matchReason: 'Pulse wave with width modulation creates the hollow, shifting tone unique to PWM.',
+    tags: ['pwm', 'pulse', 'hollow'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.5, weight: 0.7 },
+      waveformTypes: ['pulse', 'square'],
+      attack: { min: 0, max: 15, weight: 0.6 },
+      spectralCentroid: { min: 600, max: 2500, weight: 0.7 },
+      sustain: { min: 0.5, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 400, max: 2500, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 112,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 1.5,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 85, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.005, env_1_decay: 0.25, env_1_sustain: 0.75, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'hoover_lead',
+    name: 'Hoover / Mentasm',
+    category: 'lead',
+    description: 'Classic rave hoover with detuned saws and portamento. Raw 90s energy.',
+    matchReason: 'Heavily detuned unison saws with glide produce the iconic hoover/mentasm sound.',
+    tags: ['hoover', 'mentasm', 'rave'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.7, weight: 0.7 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 0, max: 15, weight: 0.6 },
+      spectralCentroid: { min: 600, max: 2500, weight: 0.7 },
+      sustain: { min: 0.4, max: 0.85, weight: 0.7 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.6 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 7.0, osc_1_unison_detune: 8.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 64,
+      osc_2_transpose: -12,
+      filter_1_on: 1.0, filter_1_cutoff: 80, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.005, env_1_decay: 0.3, env_1_sustain: 0.65, env_1_release: 0.25,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      polyphony: 1, portamento_time: 0.06,
+      distortion_on: 1.0, distortion_drive: 8.0, distortion_mix: 0.15,
+    },
+  },
+  {
+    id: 'bell_lead',
+    name: 'Bell Lead',
+    category: 'lead',
+    description: 'Bright, bell-like lead with inharmonic overtones and fast decay.',
+    matchReason: 'FM-like harmonic ratios create a metallic, bell quality that rings out clearly.',
+    tags: ['bell', 'metallic', 'bright'],
+    featureProfile: {
+      brightness: { min: 0.35, max: 0.75, weight: 0.8 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 1500, max: 5000, weight: 0.8 },
+      sustain: { min: 0.1, max: 0.5, weight: 0.8 },
+      filterCutoff: { min: 1000, max: 6000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.5, osc_2_wave_frame: 0,
+      osc_2_transpose: 19,
+      filter_1_on: 1.0, filter_1_cutoff: 105, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.6, env_1_sustain: 0.1, env_1_release: 0.5,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.25, reverb_size: 0.5,
+    },
+  },
+
+  // =========================================================================
+  // Pad — new presets
+  // =========================================================================
+  {
+    id: 'glass_pad',
+    name: 'Glass Pad',
+    category: 'pad',
+    description: 'Crystalline, shimmering pad with bell-like overtones. Delicate and bright.',
+    matchReason: 'High-register harmonics and reverb create a transparent, glassy atmosphere.',
+    tags: ['glass', 'crystalline', 'shimmer'],
+    featureProfile: {
+      brightness: { min: 0.35, max: 0.7, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 30, max: 300, weight: 0.8 },
+      spectralCentroid: { min: 1500, max: 4000, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 1000, max: 5000, weight: 0.6 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.6, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 4.0, osc_1_unison_detune: 3.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 32,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.15, env_1_decay: 0.5, env_1_sustain: 0.75, env_1_release: 0.6,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      chorus_on: 1.0, chorus_dry_wet: 0.35, chorus_frequency: 1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.4, reverb_size: 0.7,
+    },
+  },
+  {
+    id: 'dark_ambient_pad',
+    name: 'Dark Ambient Pad',
+    category: 'pad',
+    description: 'Deep, brooding pad with low filter and slow movement. Cinematic and eerie.',
+    matchReason: 'Low-passed detuned saws with large reverb create a dark, cavernous atmosphere.',
+    tags: ['dark', 'ambient', 'cinematic'],
+    featureProfile: {
+      brightness: { min: 0.02, max: 0.15, weight: 0.9 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 50, max: 500, weight: 0.8 },
+      spectralCentroid: { min: 100, max: 500, weight: 0.8 },
+      sustain: { min: 0.6, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 60, max: 300, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 4.0, osc_1_unison_detune: 5.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 64,
+      osc_2_transpose: -12,
+      filter_1_on: 1.0, filter_1_cutoff: 55, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.3, env_1_decay: 0.8, env_1_sustain: 0.7, env_1_release: 1.0,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -0.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.5, reverb_size: 0.85,
+    },
+  },
+  {
+    id: 'supersaw_pad',
+    name: 'Supersaw Pad',
+    category: 'pad',
+    description: 'Lush, wide pad from heavily detuned saws. EDM buildups and breakdowns.',
+    matchReason: 'Maximum unison detune with slow attack fills the stereo field with rich harmonics.',
+    tags: ['supersaw', 'lush', 'wide'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.6, weight: 0.7 },
+      waveformTypes: ['saw'],
+      attack: { min: 30, max: 300, weight: 0.8 },
+      spectralCentroid: { min: 500, max: 2000, weight: 0.7 },
+      sustain: { min: 0.7, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 400, max: 2500, weight: 0.6 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 7.0, osc_1_unison_detune: 6.0,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 64,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 85, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.2, env_1_decay: 0.6, env_1_sustain: 0.8, env_1_release: 0.5,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      chorus_on: 1.0, chorus_dry_wet: 0.25, chorus_frequency: 1.8,
+      reverb_on: 1.0, reverb_dry_wet: 0.3, reverb_size: 0.6,
+    },
+  },
+  {
+    id: 'analog_pad',
+    name: 'Analog Pad',
+    category: 'pad',
+    description: 'Warm, vintage pad with gentle filter and subtle drift. Classic analog polysynth.',
+    matchReason: 'Saw-triangle blend with analog filter model and gentle chorus evokes vintage warmth.',
+    tags: ['analog', 'vintage', 'warm'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.35, weight: 0.8 },
+      waveformTypes: ['saw', 'triangle'],
+      attack: { min: 30, max: 200, weight: 0.8 },
+      spectralCentroid: { min: 300, max: 1200, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 200, max: 1000, weight: 0.7 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 2.5,
+      osc_2_on: 1.0, osc_2_level: 0.5, osc_2_wave_frame: 32,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.15,
+      filter_1_model: 3, filter_1_style: 0.0,
+      env_1_attack: 0.12, env_1_decay: 0.5, env_1_sustain: 0.7, env_1_release: 0.45,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      chorus_on: 1.0, chorus_dry_wet: 0.3, chorus_frequency: 1.2,
+    },
+  },
+  {
+    id: 'sweep_pad',
+    name: 'Sweep Pad',
+    category: 'pad',
+    description: 'Evolving pad with slow filter sweep. Builds and releases tension over time.',
+    matchReason: 'Long filter envelope creates gradual timbral movement throughout sustained notes.',
+    tags: ['sweep', 'evolving', 'filter'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.5, weight: 0.7 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 50, max: 400, weight: 0.8 },
+      spectralCentroid: { min: 200, max: 1500, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.95, weight: 0.7 },
+      filterCutoff: { min: 100, max: 1000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 4.0, osc_1_unison_detune: 4.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 50, filter_1_resonance: 0.25,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.25, env_1_decay: 0.8, env_1_sustain: 0.75, env_1_release: 0.6,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      env_2_attack: 0.8, env_2_decay: 1.5, env_2_sustain: 0.3, env_2_release: 0.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.35, reverb_size: 0.65,
+    },
+  },
+  {
+    id: 'noise_pad',
+    name: 'Noise Pad',
+    category: 'pad',
+    description: 'Airy, textured pad blending noise with tonal content. Atmospheric and breathy.',
+    matchReason: 'Noise layer mixed with a soft oscillator creates a breathy, wind-like texture.',
+    tags: ['noise', 'airy', 'texture'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.5, weight: 0.7 },
+      waveformTypes: ['complex', 'sine'],
+      attack: { min: 40, max: 300, weight: 0.8 },
+      spectralCentroid: { min: 800, max: 3000, weight: 0.6 },
+      sustain: { min: 0.5, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 500, max: 3000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.5, osc_1_wave_frame: 32,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 2.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.4,
+      filter_1_on: 1.0, filter_1_cutoff: 80, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.2, env_1_decay: 0.6, env_1_sustain: 0.65, env_1_release: 0.5,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      reverb_on: 1.0, reverb_dry_wet: 0.4, reverb_size: 0.7,
+    },
+  },
+  {
+    id: 'organ_pad',
+    name: 'Organ Pad',
+    category: 'pad',
+    description: 'Sustained organ-like pad using additive sine layers. Warm and churchy.',
+    matchReason: 'Stacked sine harmonics create a tonewheel organ-like sustain without percussive click.',
+    tags: ['organ', 'sustained', 'warm'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.35, weight: 0.7 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 20, max: 150, weight: 0.7 },
+      spectralCentroid: { min: 300, max: 1200, weight: 0.7 },
+      sustain: { min: 0.7, max: 0.98, weight: 0.8 },
+      filterCutoff: { min: 200, max: 1500, weight: 0.6 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.08, env_1_decay: 0.3, env_1_sustain: 0.9, env_1_release: 0.3,
+      env_1_attack_power: 0.0, env_1_decay_power: -0.5, env_1_release_power: -1.0,
+      chorus_on: 1.0, chorus_dry_wet: 0.2, chorus_frequency: 5.0,
+    },
+  },
+
+  // =========================================================================
+  // Pluck — new presets
+  // =========================================================================
+  {
+    id: 'marimba_pluck',
+    name: 'Marimba',
+    category: 'pluck',
+    description: 'Warm, wooden marimba tone with soft attack and quick decay.',
+    matchReason: 'Sine with slight triangle overtones and fast decay emulates a struck wooden bar.',
+    tags: ['marimba', 'wooden', 'mallet'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.3, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 300, max: 1200, weight: 0.7 },
+      sustain: { min: 0.02, max: 0.15, weight: 0.9 },
+      filterCutoff: { min: 300, max: 1500, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.25, osc_2_wave_frame: 32,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 85, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.35, env_1_sustain: 0.02, env_1_release: 0.25,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
+    },
+  },
+  {
+    id: 'kalimba',
+    name: 'Kalimba',
+    category: 'pluck',
+    description: 'Bright, metallic thumb piano with bell-like ring. African-inspired.',
+    matchReason: 'Sine with inharmonic overtone and moderate decay gives the kalimba ping.',
+    tags: ['kalimba', 'thumb piano', 'metallic'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.5, weight: 0.8 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 1000, max: 3500, weight: 0.8 },
+      sustain: { min: 0.02, max: 0.12, weight: 0.9 },
+      filterCutoff: { min: 800, max: 4000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 0,
+      osc_2_transpose: 19,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.5, env_1_sustain: 0.01, env_1_release: 0.4,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.4,
+    },
+  },
+  {
+    id: 'fm_pluck',
+    name: 'FM Pluck',
+    category: 'pluck',
+    description: 'Bright FM-style pluck with metallic, digital character.',
+    matchReason: 'Non-integer harmonic ratio creates the characteristic FM metallic pluck.',
+    tags: ['fm', 'digital', 'metallic'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.65, weight: 0.8 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 1500, max: 5000, weight: 0.7 },
+      sustain: { min: 0.01, max: 0.1, weight: 0.9 },
+      filterCutoff: { min: 1000, max: 6000, weight: 0.5 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.5, osc_2_wave_frame: 0,
+      osc_2_transpose: 24,
+      filter_1_on: 1.0, filter_1_cutoff: 110, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.3, env_1_sustain: 0.01, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.0,
+    },
+  },
+  {
+    id: 'harp',
+    name: 'Harp',
+    category: 'pluck',
+    description: 'Gentle harp pluck with soft attack and long, ringing decay.',
+    matchReason: 'Triangle base with gradual decay and reverb mimics vibrating harp strings.',
+    tags: ['harp', 'gentle', 'ringing'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.4, weight: 0.7 },
+      waveformTypes: ['triangle', 'sine'],
+      attack: { min: 0, max: 10, weight: 0.8 },
+      spectralCentroid: { min: 500, max: 2000, weight: 0.7 },
+      sustain: { min: 0.05, max: 0.25, weight: 0.8 },
+      filterCutoff: { min: 400, max: 2500, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 32,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.2, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 90, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.7, env_1_sustain: 0.05, env_1_release: 0.6,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.0,
+      reverb_on: 1.0, reverb_dry_wet: 0.3, reverb_size: 0.55,
+    },
+  },
+  {
+    id: 'pizzicato',
+    name: 'Pizzicato',
+    category: 'pluck',
+    description: 'Short, snappy pizzicato string pluck. Orchestral and precise.',
+    matchReason: 'Fast attack and very short decay create a tight, plucked string character.',
+    tags: ['pizzicato', 'string', 'orchestral'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.4, weight: 0.7 },
+      waveformTypes: ['saw', 'triangle'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 400, max: 1800, weight: 0.7 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 82, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.15, env_1_sustain: 0.01, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.0, env_1_release_power: -2.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3,
+    },
+  },
+  {
+    id: 'guitar_pluck',
+    name: 'Guitar Pluck',
+    category: 'pluck',
+    description: 'Nylon-ish guitar pluck with body resonance and string decay.',
+    matchReason: 'Saw-triangle blend with moderate filter creates a convincing plucked string body.',
+    tags: ['guitar', 'nylon', 'acoustic'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.35, weight: 0.7 },
+      waveformTypes: ['saw', 'triangle'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 300, max: 1500, weight: 0.7 },
+      sustain: { min: 0.05, max: 0.25, weight: 0.8 },
+      filterCutoff: { min: 200, max: 1200, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 48,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 32,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.12,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.4, env_1_sustain: 0.08, env_1_release: 0.3,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'synth_stab',
+    name: 'Synth Stab',
+    category: 'pluck',
+    description: 'Punchy chord stab with fast filter snap. Classic house and garage.',
+    matchReason: 'Quick filter envelope with moderate resonance creates the iconic stab transient.',
+    tags: ['stab', 'house', 'punchy'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw', 'square'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 500, max: 2500, weight: 0.7 },
+      sustain: { min: 0.01, max: 0.1, weight: 0.9 },
+      filterCutoff: { min: 200, max: 1500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 3.0, osc_1_unison_detune: 3.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 96,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 70, filter_1_resonance: 0.3,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.12, env_1_sustain: 0.01, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.0, env_1_release_power: -2.5,
+      env_2_attack: 0.001, env_2_decay: 0.08, env_2_sustain: 0.0, env_2_release: 0.05,
+    },
+  },
+  {
+    id: 'music_box',
+    name: 'Music Box',
+    category: 'pluck',
+    description: 'Delicate, tinkling music box with pure tone and gentle decay.',
+    matchReason: 'Pure sine with very short decay and high-register octave creates the tiny, precious sound.',
+    tags: ['music box', 'delicate', 'tinkling'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.4, weight: 0.8 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 3, weight: 0.9 },
+      spectralCentroid: { min: 2000, max: 6000, weight: 0.8 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 1500, max: 6000, weight: 0.5 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.65, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 0,
+      osc_2_transpose: 24,
+      filter_1_on: 1.0, filter_1_cutoff: 108, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.6, env_1_sustain: 0.01, env_1_release: 0.5,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.25, reverb_size: 0.45,
+    },
+  },
+
+  // =========================================================================
+  // Kick — new presets
+  // =========================================================================
+  {
+    id: 'vinyl_kick',
+    name: 'Vinyl Kick',
+    category: 'kick',
+    description: 'Warm, lo-fi kick with soft transient. Sampled vinyl character.',
+    matchReason: 'Rounded sine with gentle attack and low-pass filtering gives a dusty, warm thump.',
+    tags: ['vinyl', 'lo-fi', 'warm'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.02, max: 0.1, weight: 0.9 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 40, max: 150, weight: 0.9 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 40, max: 200, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 55, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.003, env_1_decay: 0.2, env_1_sustain: 0.0, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.5,
+    },
+  },
+  {
+    id: 'boomy_kick',
+    name: 'Boomy Kick',
+    category: 'kick',
+    description: 'Large, boomy kick with extended low-end tail. Big room and festival sound.',
+    matchReason: 'Long sub decay with pitch envelope creates a massive, room-filling boom.',
+    tags: ['boomy', 'big room', 'festival'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.02, max: 0.12, weight: 0.9 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 40, max: 180, weight: 0.9 },
+      sustain: { min: 0.01, max: 0.1, weight: 0.9 },
+      filterCutoff: { min: 40, max: 250, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.95, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 0.0,
+      filter_1_on: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.45, env_1_sustain: 0.0, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
+      distortion_on: 1.0, distortion_drive: 5.0, distortion_mix: 0.1,
+    },
+  },
+  {
+    id: 'distorted_kick',
+    name: 'Distorted Kick',
+    category: 'kick',
+    description: 'Crunchy, saturated kick with aggressive midrange. Industrial and hard dance.',
+    matchReason: 'Heavy drive on the sine body pushes harmonics into the midrange for an aggressive punch.',
+    tags: ['distorted', 'industrial', 'hard'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.08, max: 0.3, weight: 0.8 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 60, max: 350, weight: 0.8 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 60, max: 400, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.2, env_1_sustain: 0.0, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -3.0,
+      distortion_on: 1.0, distortion_drive: 25.0, distortion_mix: 0.45,
+    },
+  },
+  {
+    id: 'minimal_kick',
+    name: 'Minimal Kick',
+    category: 'kick',
+    description: 'Tight, clean kick with short decay. Minimal techno and microhouse.',
+    matchReason: 'Very short sine with minimal harmonics sits cleanly in sparse arrangements.',
+    tags: ['minimal', 'clean', 'tight'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.01, max: 0.08, weight: 0.9 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 3, weight: 0.9 },
+      spectralCentroid: { min: 35, max: 120, weight: 0.9 },
+      sustain: { min: 0.0, max: 0.03, weight: 0.9 },
+      filterCutoff: { min: 35, max: 150, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 0.0,
+      filter_1_on: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.1, env_1_sustain: 0.0, env_1_release: 0.05,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.0, env_1_release_power: -3.0,
+    },
+  },
+  {
+    id: 'gabber_kick',
+    name: 'Gabber Kick',
+    category: 'kick',
+    description: 'Extremely distorted kick with long, pitched tail. Hardcore and gabber.',
+    matchReason: 'Massive distortion on the sine creates the signature gabber kick with tonal decay.',
+    tags: ['gabber', 'hardcore', 'distorted'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.4, weight: 0.7 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 80, max: 500, weight: 0.7 },
+      sustain: { min: 0.01, max: 0.1, weight: 0.8 },
+      filterCutoff: { min: 60, max: 500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 1.0, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 80, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.35, env_1_sustain: 0.0, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
+      distortion_on: 1.0, distortion_drive: 40.0, distortion_mix: 0.6,
+      compressor_on: 1.0,
+    },
+  },
+  {
+    id: 'layered_kick',
+    name: 'Layered Kick',
+    category: 'kick',
+    description: 'Two-layer kick: click transient on top, sub body below. Punchy and full.',
+    matchReason: 'OSC 2 provides the click transient while OSC 1 handles the sub body.',
+    tags: ['layered', 'punchy', 'full'],
+    postProcess: 'kick',
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.2, weight: 0.8 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 50, max: 250, weight: 0.8 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 40, max: 300, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.9, osc_1_wave_frame: 0,
+      osc_1_transpose: -24,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 32,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 68, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.25, env_1_sustain: 0.0, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.5,
+      distortion_on: 1.0, distortion_drive: 8.0, distortion_mix: 0.15,
+      compressor_on: 1.0,
+    },
+  },
+
+  // =========================================================================
+  // Drums — new presets
+  // =========================================================================
+  {
+    id: 'tight_snare',
+    name: 'Tight Snare',
+    category: 'drums',
+    description: 'Short, punchy snare with crisp transient and fast decay.',
+    matchReason: 'Noise burst with tight envelope and bandpass filtering creates a sharp snare crack.',
+    tags: ['snare', 'tight', 'punchy'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.7, weight: 0.7 },
+      waveformTypes: ['complex'],
+      attack: { min: 0, max: 3, weight: 0.9 },
+      spectralCentroid: { min: 1000, max: 5000, weight: 0.7 },
+      sustain: { min: 0.0, max: 0.05, weight: 0.9 },
+      filterCutoff: { min: 500, max: 4000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.5, osc_1_wave_frame: 32,
+      osc_1_transpose: 0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.7,
+      filter_1_on: 1.0, filter_1_cutoff: 90, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.08, env_1_sustain: 0.0, env_1_release: 0.04,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.0, env_1_release_power: -3.0,
+    },
+  },
+  {
+    id: 'reverb_snare',
+    name: 'Reverb Snare',
+    category: 'drums',
+    description: 'Snare with long reverb tail. 80s gated or ambient character.',
+    matchReason: 'Large reverb on a short snare transient creates dramatic spatial impact.',
+    tags: ['snare', 'reverb', '80s'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.6, weight: 0.7 },
+      waveformTypes: ['complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 800, max: 4000, weight: 0.7 },
+      sustain: { min: 0.02, max: 0.15, weight: 0.8 },
+      filterCutoff: { min: 500, max: 4000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.5, osc_1_wave_frame: 32,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.65,
+      filter_1_on: 1.0, filter_1_cutoff: 92, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.12, env_1_sustain: 0.01, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.5, reverb_size: 0.8,
+    },
+  },
+  {
+    id: 'closed_hihat',
+    name: 'Closed Hi-Hat',
+    category: 'drums',
+    description: 'Tight, metallic closed hi-hat tick. Essential rhythm element.',
+    matchReason: 'High-frequency noise with very short envelope creates a sharp, metallic tick.',
+    tags: ['hi-hat', 'closed', 'metallic'],
+    featureProfile: {
+      brightness: { min: 0.5, max: 0.9, weight: 0.8 },
+      waveformTypes: ['complex'],
+      attack: { min: 0, max: 2, weight: 0.9 },
+      spectralCentroid: { min: 5000, max: 12000, weight: 0.8 },
+      sustain: { min: 0.0, max: 0.02, weight: 0.9 },
+      filterCutoff: { min: 4000, max: 12000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 0.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.8,
+      filter_1_on: 1.0, filter_1_cutoff: 115, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 1.0,
+      env_1_attack: 0.001, env_1_decay: 0.03, env_1_sustain: 0.0, env_1_release: 0.02,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.5, env_1_release_power: -3.5,
+    },
+  },
+  {
+    id: 'open_hihat',
+    name: 'Open Hi-Hat',
+    category: 'drums',
+    description: 'Sizzling open hi-hat with longer decay. Adds energy and movement.',
+    matchReason: 'High-frequency noise with extended decay creates a sizzling, open wash.',
+    tags: ['hi-hat', 'open', 'sizzle'],
+    featureProfile: {
+      brightness: { min: 0.5, max: 0.9, weight: 0.8 },
+      waveformTypes: ['complex'],
+      attack: { min: 0, max: 3, weight: 0.9 },
+      spectralCentroid: { min: 5000, max: 12000, weight: 0.8 },
+      sustain: { min: 0.02, max: 0.15, weight: 0.8 },
+      filterCutoff: { min: 4000, max: 12000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 0.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.75,
+      filter_1_on: 1.0, filter_1_cutoff: 115, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 1.0,
+      env_1_attack: 0.001, env_1_decay: 0.2, env_1_sustain: 0.02, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
+    },
+  },
+  {
+    id: 'clap',
+    name: 'Clap',
+    category: 'drums',
+    description: 'Layered hand clap with short pre-delay flams. Snappy and human.',
+    matchReason: 'Noise burst with bandpass filter and moderate reverb mimics layered hand claps.',
+    tags: ['clap', 'snappy', 'hands'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.65, weight: 0.7 },
+      waveformTypes: ['complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 1000, max: 5000, weight: 0.7 },
+      sustain: { min: 0.01, max: 0.08, weight: 0.9 },
+      filterCutoff: { min: 800, max: 4000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 0.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.8,
+      filter_1_on: 1.0, filter_1_cutoff: 95, filter_1_resonance: 0.2,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.1, env_1_sustain: 0.01, env_1_release: 0.06,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.25,
+    },
+  },
+  {
+    id: 'rimshot',
+    name: 'Rim Shot',
+    category: 'drums',
+    description: 'Sharp rimshot click with bright transient. Clean and precise.',
+    matchReason: 'High-pitched sine click with noise layer creates a sharp, cutting rim sound.',
+    tags: ['rim', 'click', 'sharp'],
+    featureProfile: {
+      brightness: { min: 0.35, max: 0.7, weight: 0.8 },
+      waveformTypes: ['sine', 'complex'],
+      attack: { min: 0, max: 2, weight: 0.9 },
+      spectralCentroid: { min: 2000, max: 6000, weight: 0.8 },
+      sustain: { min: 0.0, max: 0.03, weight: 0.9 },
+      filterCutoff: { min: 1500, max: 6000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.6, osc_1_wave_frame: 0,
+      osc_1_transpose: 12,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.5,
+      filter_1_on: 1.0, filter_1_cutoff: 105, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.04, env_1_sustain: 0.0, env_1_release: 0.02,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.5, env_1_release_power: -3.5,
+    },
+  },
+
+  // =========================================================================
+  // Keys — new presets
+  // =========================================================================
+  {
+    id: 'clavinet',
+    name: 'Clavinet',
+    category: 'keys',
+    description: 'Funky clavinet with bright, percussive attack and nasal tone.',
+    matchReason: 'Square wave with resonant filter and fast decay creates the funky clavinet bark.',
+    tags: ['clavinet', 'funky', 'percussive'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.55, weight: 0.8 },
+      waveformTypes: ['square', 'pulse'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 800, max: 3000, weight: 0.7 },
+      sustain: { min: 0.1, max: 0.4, weight: 0.7 },
+      filterCutoff: { min: 500, max: 2500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 96,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 85, filter_1_resonance: 0.35,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.2, env_1_sustain: 0.25, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.5,
+      env_2_attack: 0.001, env_2_decay: 0.06, env_2_sustain: 0.0, env_2_release: 0.04,
+    },
+  },
+  {
+    id: 'toy_piano',
+    name: 'Toy Piano',
+    category: 'keys',
+    description: 'Bright, thin toy piano with metallic, childlike character.',
+    matchReason: 'High-register sine with slight detuning gives the charming, imperfect toy quality.',
+    tags: ['toy', 'childlike', 'bright'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.55, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 1500, max: 5000, weight: 0.8 },
+      sustain: { min: 0.05, max: 0.2, weight: 0.8 },
+      filterCutoff: { min: 1000, max: 5000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 1.5,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.35, env_1_sustain: 0.08, env_1_release: 0.25,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.0, env_1_release_power: -2.0,
+    },
+  },
+  {
+    id: 'harpsichord',
+    name: 'Harpsichord',
+    category: 'keys',
+    description: 'Bright, plucky harpsichord with sharp attack and quick release.',
+    matchReason: 'Saw with fast filter envelope snap mimics the mechanical pluck of a harpsichord.',
+    tags: ['harpsichord', 'baroque', 'plucky'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.65, weight: 0.8 },
+      waveformTypes: ['saw'],
+      attack: { min: 0, max: 3, weight: 0.9 },
+      spectralCentroid: { min: 1000, max: 4000, weight: 0.8 },
+      sustain: { min: 0.05, max: 0.2, weight: 0.8 },
+      filterCutoff: { min: 600, max: 3000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.25, osc_2_wave_frame: 64,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 95, filter_1_resonance: 0.12,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.25, env_1_sustain: 0.1, env_1_release: 0.12,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.5,
+      env_2_attack: 0.001, env_2_decay: 0.04, env_2_sustain: 0.0, env_2_release: 0.03,
+    },
+  },
+  {
+    id: 'celesta',
+    name: 'Celesta',
+    category: 'keys',
+    description: 'Sparkling celesta with bell-like clarity. Delicate and magical.',
+    matchReason: 'Pure sine with octave harmonic and moderate decay creates the celesta sparkle.',
+    tags: ['celesta', 'sparkling', 'magical'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.5, weight: 0.8 },
+      waveformTypes: ['sine'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 2000, max: 6000, weight: 0.8 },
+      sustain: { min: 0.05, max: 0.2, weight: 0.8 },
+      filterCutoff: { min: 1500, max: 6000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.65, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 105, filter_1_resonance: 0.05,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.5, env_1_sustain: 0.05, env_1_release: 0.4,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.25, reverb_size: 0.45,
+    },
+  },
+
+  // =========================================================================
+  // Guitar — new presets
+  // =========================================================================
+  {
+    id: 'palm_muted_guitar',
+    name: 'Palm Muted Guitar',
+    category: 'guitar',
+    description: 'Tight, muted guitar chug with damped strings. Metal and rock rhythm.',
+    matchReason: 'Low-passed saw with very fast decay mimics the tight thud of palm-muted strings.',
+    tags: ['palm mute', 'metal', 'chug'],
+    featureProfile: {
+      brightness: { min: 0.08, max: 0.25, weight: 0.8 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 0, max: 5, weight: 0.9 },
+      spectralCentroid: { min: 200, max: 800, weight: 0.8 },
+      sustain: { min: 0.01, max: 0.1, weight: 0.9 },
+      filterCutoff: { min: 150, max: 600, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 2.0, osc_1_unison_detune: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 62, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.06, env_1_sustain: 0.02, env_1_release: 0.04,
+      env_1_attack_power: 0.0, env_1_decay_power: -3.0, env_1_release_power: -3.0,
+      distortion_on: 1.0, distortion_drive: 15.0, distortion_mix: 0.3,
+    },
+  },
+  {
+    id: 'funk_guitar',
+    name: 'Funk Guitar',
+    category: 'guitar',
+    description: 'Bright, snappy funk guitar with wah-like filter. Rhythmic and groovy.',
+    matchReason: 'Saw with resonant filter and quick envelope gives the funky chick/wah character.',
+    tags: ['funk', 'wah', 'rhythmic'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw', 'triangle'],
+      attack: { min: 0, max: 8, weight: 0.8 },
+      spectralCentroid: { min: 500, max: 2500, weight: 0.7 },
+      sustain: { min: 0.1, max: 0.35, weight: 0.8 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 72, filter_1_resonance: 0.4,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.001, env_1_decay: 0.15, env_1_sustain: 0.2, env_1_release: 0.06,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.5,
+      env_2_attack: 0.001, env_2_decay: 0.1, env_2_sustain: 0.0, env_2_release: 0.06,
+    },
+  },
+  {
+    id: 'power_chord',
+    name: 'Power Chord',
+    category: 'guitar',
+    description: 'Distorted power chord with thick fifth interval. Rock and punk staple.',
+    matchReason: 'Saw with fifth-interval OSC 2 and heavy distortion creates a wall-of-guitars feel.',
+    tags: ['power chord', 'rock', 'distorted'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.5, weight: 0.7 },
+      waveformTypes: ['saw', 'complex'],
+      attack: { min: 0, max: 10, weight: 0.7 },
+      spectralCentroid: { min: 400, max: 2000, weight: 0.7 },
+      sustain: { min: 0.4, max: 0.8, weight: 0.7 },
+      filterCutoff: { min: 300, max: 1500, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 3.0, osc_1_unison_detune: 2.0,
+      osc_2_on: 1.0, osc_2_level: 0.7, osc_2_wave_frame: 64,
+      osc_2_transpose: 7,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.3, env_1_sustain: 0.65, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      distortion_on: 1.0, distortion_drive: 20.0, distortion_mix: 0.4,
+    },
+  },
+  {
+    id: 'nylon_guitar',
+    name: 'Nylon Guitar',
+    category: 'guitar',
+    description: 'Soft, warm nylon string guitar with round tone. Classical and bossa nova.',
+    matchReason: 'Triangle-based tone with gentle filter and moderate decay evokes nylon string warmth.',
+    tags: ['nylon', 'classical', 'soft'],
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.25, weight: 0.8 },
+      waveformTypes: ['triangle', 'sine'],
+      attack: { min: 0, max: 10, weight: 0.8 },
+      spectralCentroid: { min: 200, max: 1000, weight: 0.7 },
+      sustain: { min: 0.1, max: 0.35, weight: 0.8 },
+      filterCutoff: { min: 150, max: 800, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 32,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.2, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 70, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.003, env_1_decay: 0.35, env_1_sustain: 0.15, env_1_release: 0.25,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3,
+    },
+  },
+
+  // =========================================================================
+  // Brass — new presets
+  // =========================================================================
+  {
+    id: 'muted_trumpet',
+    name: 'Muted Trumpet',
+    category: 'brass',
+    description: 'Soft, muted trumpet with contained tone. Jazz and lounge feel.',
+    matchReason: 'Saw with tight bandpass filter emulates the restricted harmonic range of a muted horn.',
+    tags: ['muted', 'jazz', 'soft'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.3, weight: 0.8 },
+      waveformTypes: ['saw'],
+      attack: { min: 5, max: 30, weight: 0.8 },
+      spectralCentroid: { min: 400, max: 1500, weight: 0.8 },
+      sustain: { min: 0.5, max: 0.85, weight: 0.7 },
+      filterCutoff: { min: 300, max: 1200, weight: 0.8 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 68, filter_1_resonance: 0.25,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.02, env_1_decay: 0.2, env_1_sustain: 0.7, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3,
+    },
+  },
+  {
+    id: 'big_band_brass',
+    name: 'Big Band Brass',
+    category: 'brass',
+    description: 'Bold, bright brass section with full harmonic content. Big band and pop.',
+    matchReason: 'Layered saws with open filter and moderate attack create a powerful brass ensemble.',
+    tags: ['big band', 'bold', 'section'],
+    featureProfile: {
+      brightness: { min: 0.3, max: 0.65, weight: 0.8 },
+      waveformTypes: ['saw', 'square'],
+      attack: { min: 10, max: 50, weight: 0.7 },
+      spectralCentroid: { min: 800, max: 3000, weight: 0.7 },
+      sustain: { min: 0.5, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 500, max: 3000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 3.0, osc_1_unison_detune: 2.5,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 96,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 92, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.02, env_1_decay: 0.3, env_1_sustain: 0.75, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'synth_brass',
+    name: 'Synth Brass',
+    category: 'brass',
+    description: 'Classic 80s synth brass with filter sweep and unison detune.',
+    matchReason: 'Detuned saws with slow filter attack recreate the iconic analog synth brass.',
+    tags: ['synth brass', '80s', 'analog'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw'],
+      attack: { min: 15, max: 60, weight: 0.8 },
+      spectralCentroid: { min: 500, max: 2500, weight: 0.7 },
+      sustain: { min: 0.5, max: 0.85, weight: 0.7 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.7 },
+      hasChorus: true,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 4.0, osc_1_unison_detune: 3.5,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 64,
+      osc_2_transpose: -12,
+      filter_1_on: 1.0, filter_1_cutoff: 65, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.03, env_1_decay: 0.35, env_1_sustain: 0.7, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      env_2_attack: 0.05, env_2_decay: 0.3, env_2_sustain: 0.4, env_2_release: 0.2,
+      chorus_on: 1.0, chorus_dry_wet: 0.2, chorus_frequency: 2.0,
+    },
+  },
+  {
+    id: 'horn_stab',
+    name: 'Horn Stab',
+    category: 'brass',
+    description: 'Short, punchy brass stab for accents. Funk and dance arrangements.',
+    matchReason: 'Quick filter snap on detuned saws creates a tight, punchy brass hit.',
+    tags: ['stab', 'horn', 'punchy'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.55, weight: 0.7 },
+      waveformTypes: ['saw', 'square'],
+      attack: { min: 0, max: 8, weight: 0.9 },
+      spectralCentroid: { min: 600, max: 2500, weight: 0.7 },
+      sustain: { min: 0.02, max: 0.15, weight: 0.9 },
+      filterCutoff: { min: 400, max: 2000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.85, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 3.0, osc_1_unison_detune: 2.0,
+      osc_2_on: 1.0, osc_2_level: 0.4, osc_2_wave_frame: 96,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.15,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.002, env_1_decay: 0.1, env_1_sustain: 0.03, env_1_release: 0.06,
+      env_1_attack_power: 0.0, env_1_decay_power: -2.5, env_1_release_power: -2.5,
+      env_2_attack: 0.001, env_2_decay: 0.05, env_2_sustain: 0.0, env_2_release: 0.03,
+    },
+  },
+
+  // =========================================================================
+  // Woodwind — new presets
+  // =========================================================================
+  {
+    id: 'pan_flute',
+    name: 'Pan Flute',
+    category: 'woodwind',
+    description: 'Breathy pan flute with airy attack and warm sustained tone.',
+    matchReason: 'Sine with noise layer on attack creates the characteristic breathy flute onset.',
+    tags: ['pan flute', 'breathy', 'ethnic'],
+    featureProfile: {
+      brightness: { min: 0.08, max: 0.25, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 10, max: 50, weight: 0.8 },
+      spectralCentroid: { min: 400, max: 1500, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 300, max: 1500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.15,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.04, env_1_decay: 0.25, env_1_sustain: 0.75, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.4,
+    },
+  },
+  {
+    id: 'oboe',
+    name: 'Oboe',
+    category: 'woodwind',
+    description: 'Nasal, reedy oboe with focused midrange tone. Orchestral and expressive.',
+    matchReason: 'Saw with narrow bandpass filter creates the focused, nasal reed quality.',
+    tags: ['oboe', 'reedy', 'orchestral'],
+    featureProfile: {
+      brightness: { min: 0.15, max: 0.4, weight: 0.8 },
+      waveformTypes: ['saw'],
+      attack: { min: 8, max: 40, weight: 0.8 },
+      spectralCentroid: { min: 600, max: 2000, weight: 0.8 },
+      sustain: { min: 0.6, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 400, max: 1800, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.75, osc_1_wave_frame: 64,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.3,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.025, env_1_decay: 0.2, env_1_sustain: 0.8, env_1_release: 0.15,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.12, reverb_size: 0.25,
+    },
+  },
+  {
+    id: 'recorder',
+    name: 'Recorder',
+    category: 'woodwind',
+    description: 'Simple, pure recorder tone. Light and folk-like.',
+    matchReason: 'Nearly pure sine with gentle triangle overtone mimics the simple recorder timbre.',
+    tags: ['recorder', 'folk', 'simple'],
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.2, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 5, max: 30, weight: 0.8 },
+      spectralCentroid: { min: 500, max: 1800, weight: 0.7 },
+      sustain: { min: 0.6, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 400, max: 1500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.15, osc_2_wave_frame: 32,
+      osc_2_transpose: 0,
+      filter_1_on: 1.0, filter_1_cutoff: 82, filter_1_resonance: 0.08,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.02, env_1_decay: 0.15, env_1_sustain: 0.8, env_1_release: 0.12,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+    },
+  },
+  {
+    id: 'piccolo',
+    name: 'Piccolo',
+    category: 'woodwind',
+    description: 'Bright, piercing piccolo in the upper register. High and cutting.',
+    matchReason: 'High-register sine with slight breath noise cuts through any arrangement.',
+    tags: ['piccolo', 'bright', 'high'],
+    featureProfile: {
+      brightness: { min: 0.2, max: 0.5, weight: 0.8 },
+      waveformTypes: ['sine'],
+      attack: { min: 5, max: 25, weight: 0.8 },
+      spectralCentroid: { min: 2000, max: 6000, weight: 0.8 },
+      sustain: { min: 0.6, max: 0.9, weight: 0.7 },
+      filterCutoff: { min: 1500, max: 5000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.65, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 0.0,
+      sample_on: 1.0, sample_level: 0.1,
+      filter_1_on: 1.0, filter_1_cutoff: 100, filter_1_resonance: 0.12,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.02, env_1_decay: 0.15, env_1_sustain: 0.8, env_1_release: 0.1,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.1, reverb_size: 0.2,
+    },
+  },
+
+  // --- Additional Drums ---
+  {
+    id: 'tom_hit',
+    name: 'Tom Hit',
+    category: 'drums',
+    description: 'Mid-range tom hit with pitched body and controlled decay.',
+    matchReason: 'Sine-based pitch with moderate decay creates a resonant tom body.',
+    tags: ['tom', 'percussion', 'pitched'],
+    featureProfile: {
+      brightness: { min: 0.1, max: 0.35, weight: 0.8 },
+      waveformTypes: ['sine', 'triangle'],
+      attack: { min: 0, max: 8, weight: 1.0 },
+      spectralCentroid: { min: 300, max: 1500, weight: 0.7 },
+      sustain: { min: 0.0, max: 0.2, weight: 0.9 },
+      filterCutoff: { min: 300, max: 2000, weight: 0.6 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.8, osc_1_wave_frame: 0,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 32,
+      osc_2_transpose: 7,
+      sample_on: 1.0, sample_level: 0.15,
+      filter_1_on: 1.0, filter_1_cutoff: 75, filter_1_resonance: 0.1,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.0, env_1_decay: 0.18, env_1_sustain: 0.0, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
+      reverb_on: 1.0, reverb_dry_wet: 0.15, reverb_size: 0.3,
+    },
+  },
+
+  // --- Additional Keys ---
+  {
+    id: 'wurlitzer',
+    name: 'Wurlitzer',
+    category: 'keys',
+    description: 'Warm, slightly overdriven Wurlitzer electric piano with bark and bite.',
+    matchReason: 'Triangle-saw blend with moderate drive and resonant filter creates that classic 70s electric piano tone.',
+    tags: ['wurlitzer', 'electric piano', 'vintage'],
+    featureProfile: {
+      brightness: { min: 0.25, max: 0.55, weight: 0.8 },
+      waveformTypes: ['pulse', 'square'],
+      attack: { min: 1, max: 15, weight: 0.9 },
+      spectralCentroid: { min: 1200, max: 3500, weight: 0.7 },
+      sustain: { min: 0.3, max: 0.65, weight: 0.7 },
+      filterCutoff: { min: 800, max: 3000, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.7, osc_1_wave_frame: 112,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.3, osc_2_wave_frame: 96,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 78, filter_1_resonance: 0.35,
+      filter_1_model: 3, filter_1_style: 1.0,
+      env_1_attack: 0.005, env_1_decay: 0.2, env_1_sustain: 0.35, env_1_release: 0.08,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.5, env_1_release_power: -2.0,
+    },
+  },
+
+  // --- Additional Guitar ---
+  {
+    id: 'jazz_guitar',
+    name: 'Jazz Guitar',
+    category: 'guitar',
+    description: 'Warm, round jazz guitar with soft attack, dark tone and rich body.',
+    matchReason: 'Triangle-sine blend with gentle envelope and low filter creates warm hollow-body jazz tone.',
+    tags: ['jazz', 'clean', 'guitar'],
+    featureProfile: {
+      brightness: { min: 0.05, max: 0.2, weight: 0.9 },
+      waveformTypes: ['triangle', 'sine'],
+      attack: { min: 5, max: 30, weight: 0.8 },
+      spectralCentroid: { min: 400, max: 1500, weight: 0.8 },
+      sustain: { min: 0.2, max: 0.5, weight: 0.7 },
+      filterCutoff: { min: 400, max: 1500, weight: 0.7 },
+      hasChorus: false,
+    },
+    settings: {
+      osc_1_on: 1.0, osc_1_level: 0.65, osc_1_wave_frame: 32,
+      osc_1_unison_voices: 1.0,
+      osc_2_on: 1.0, osc_2_level: 0.35, osc_2_wave_frame: 0,
+      osc_2_transpose: 12,
+      filter_1_on: 1.0, filter_1_cutoff: 68, filter_1_resonance: 0.12,
+      filter_1_model: 0, filter_1_style: 0.0,
+      env_1_attack: 0.01, env_1_decay: 0.35, env_1_sustain: 0.3, env_1_release: 0.2,
+      env_1_attack_power: 0.0, env_1_decay_power: -1.0, env_1_release_power: -1.5,
+      reverb_on: 1.0, reverb_dry_wet: 0.2, reverb_size: 0.35,
+    },
+  },
 ];
 
 // =============================================================================
@@ -1324,43 +3336,43 @@ export function scorePresetMatch(preset, features) {
 
   // 1. Brightness (0-1 float)
   if (fp.brightness && features.brightness != null) {
-    const val = parseFloat(features.brightness);
+    const val = Number(features.brightness);
     totalScore += scoreRange(val, fp.brightness) * 20;
     totalWeight += 20;
   }
 
-  // 2. Waveform type match
+  // 2. Waveform type match (highest weight — most discriminating feature)
   if (fp.waveformTypes && features.waveform?.type) {
     const detected = features.waveform.type;
     const match = fp.waveformTypes.includes(detected);
-    totalScore += match ? 15 : 0;
-    totalWeight += 15;
+    totalScore += match ? 25 : 0;
+    totalWeight += 25;
   }
 
   // 3. Attack time (ms)
   if (fp.attack && features.adsr?.attack != null) {
-    const val = parseFloat(features.adsr.attack);
+    const val = Number(features.adsr.attack);
     totalScore += scoreRange(val, fp.attack) * 12;
     totalWeight += 12;
   }
 
   // 4. Spectral centroid (Hz)
   if (fp.spectralCentroid && features.spectralCentroid != null) {
-    const val = parseFloat(features.spectralCentroid);
+    const val = Number(features.spectralCentroid);
     totalScore += scoreRange(val, fp.spectralCentroid) * 10;
     totalWeight += 10;
   }
 
   // 5. Sustain (0-1 from ADSR, convert from percentage)
   if (fp.sustain && features.adsr?.sustain != null) {
-    const val = parseFloat(features.adsr.sustain) / 100; // ADSR sustain is 0-100%
+    const val = Number(features.adsr.sustain) / 100; // ADSR sustain is 0-100%
     totalScore += scoreRange(val, fp.sustain) * 8;
     totalWeight += 8;
   }
 
   // 6. Filter cutoff (Hz)
   if (fp.filterCutoff && features.filterEnvelope?.estimatedCutoff != null) {
-    const val = parseFloat(features.filterEnvelope.estimatedCutoff);
+    const val = Number(features.filterEnvelope.estimatedCutoff);
     totalScore += scoreRange(val, fp.filterCutoff) * 8;
     totalWeight += 8;
   }
@@ -1383,15 +3395,651 @@ export function scorePresetMatch(preset, features) {
 function scoreRange(value, range) {
   if (value >= range.min && value <= range.max) return 1.0;
 
-  // Linear falloff: how far outside the range, relative to range width
+  // Quadratic falloff: steeper penalty for values far outside the range
   const rangeWidth = Math.max(range.max - range.min, 1);
   if (value < range.min) {
     const dist = range.min - value;
-    return Math.max(0, 1 - dist / rangeWidth);
+    const ratio = dist / rangeWidth;
+    return Math.max(0, 1 - ratio * ratio); // Quadratic: drops faster than linear
   } else {
     const dist = value - range.max;
-    return Math.max(0, 1 - dist / rangeWidth);
+    const ratio = dist / rangeWidth;
+    return Math.max(0, 1 - ratio * ratio);
   }
+}
+
+// =============================================================================
+// Spectral Fingerprint-Based Preset Matching
+// =============================================================================
+
+/**
+ * Score a single preset against source audio using spectral fingerprinting.
+ * Pre-renders the preset as audio, then compares its spectrum directly against
+ * the source audio's spectrum using cosine similarity.
+ *
+ * @param {Object} preset - A curated preset object from CURATED_PRESETS
+ * @param {Float32Array} sourceChannelData - Source audio mono channel data
+ * @param {number} sampleRate - Source audio sample rate
+ * @param {Object} [features] - Analysis features (used for heuristic fallback)
+ * @returns {Promise<number>} Score 0-100
+ */
+export async function scorePresetMatchSpectral(preset, sourceChannelData, sampleRate, features) {
+  try {
+    const { renderPresetToChannelData, quickSpectralScore } = await import('../utils/demoSoundGenerator.js');
+    const presetChannelData = await renderPresetToChannelData(preset.id, preset.settings, 2, {});
+    return quickSpectralScore(presetChannelData, sourceChannelData, sampleRate);
+  } catch (err) {
+    console.warn(`Spectral scoring failed for preset ${preset.id}, falling back to heuristic:`, err.message);
+    return scorePresetMatch(preset, features);
+  }
+}
+
+/**
+ * Score an array of presets against source audio using spectral fingerprinting.
+ * Renders each preset sequentially to avoid overwhelming the audio thread.
+ * Falls back to heuristic scoring when source audio is unavailable.
+ *
+ * @param {Array} presets - Array of curated preset objects
+ * @param {Float32Array|null} sourceChannelData - Source audio mono channel data (null = use heuristic)
+ * @param {number} sampleRate - Source audio sample rate
+ * @param {Object} [features] - Analysis features (used for heuristic fallback or when no source audio)
+ * @param {Object} [options] - Options
+ * @param {Function} [options.onProgress] - Progress callback (0-1)
+ * @param {Object} [options.signal] - AbortSignal-like object with { aborted: boolean }
+ * @returns {Promise<Array<{preset: Object, score: number}>>} Sorted by score descending
+ */
+export async function scorePresetsWithSpectral(presets, sourceChannelData, sampleRate, features, options = {}) {
+  const { onProgress, signal } = options;
+
+  // No source audio — fall back to heuristic scoring for all presets
+  if (!sourceChannelData || !sampleRate) {
+    return presets
+      .map(preset => ({ preset, score: scorePresetMatch(preset, features) }))
+      .sort((a, b) => b.score - a.score);
+  }
+
+  const results = [];
+  for (let i = 0; i < presets.length; i++) {
+    // Check for cancellation between each render
+    if (signal?.aborted) return results;
+
+    const score = await scorePresetMatchSpectral(presets[i], sourceChannelData, sampleRate, features);
+    results.push({ preset: presets[i], score });
+
+    if (onProgress) onProgress((i + 1) / presets.length);
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+// =============================================================================
+// Analysis-Driven Tuning (automatically adjust preset based on detected features)
+// =============================================================================
+
+/**
+ * Compute tuning slider overrides from analysis features.
+ * Maps detected audio characteristics to Vital parameter values so each sound
+ * gets a unique preset even when starting from the same curated base.
+ *
+ * @param {Object} preset - The selected curated preset
+ * @param {Object} features - Analysis features from the worker
+ * @returns {Object} Tuning overrides keyed by TUNING_PARAMS id
+ */
+export function computeAnalysisTuning(preset, features) {
+  if (!preset || !features) return {};
+  const overrides = {};
+  const settings = preset.settings || {};
+
+  // Helper: convert Hz to Vital's semitone scale (8-136)
+  // 8.176 Hz ≈ MIDI note 0
+  const hzToSemitones = (hz) => Math.max(8, Math.min(136, 12 * Math.log2(Math.max(hz, 20) / 8.176)));
+
+  // --- Filter Cutoff ---
+  // Use filter envelope analysis (tracks spectral centroid trajectory) as the primary
+  // cutoff estimate. Falls back to raw spectral centroid (2-3x above perceived cutoff)
+  // or brightness. Prefer minCutoff for opening sweeps (filter base position),
+  // estimatedCutoff (average position) otherwise.
+  const presetCutoff = settings.filter_1_cutoff ?? 80;
+  {
+    let analysisCutoff = null;
+    if (features.filterEnvelope) {
+      const fe = features.filterEnvelope;
+      if (fe.sweepDirection === 'opening' || fe.sweepDirection === 'bandpass') {
+        // For opening/bandpass sweeps, use minCutoff as the filter base position
+        // (ENV 2 modulation will sweep up from here)
+        const cutoffHz = fe.minCutoff ?? fe.estimatedCutoff;
+        if (cutoffHz != null) analysisCutoff = hzToSemitones(cutoffHz);
+      } else if (fe.sweepDirection === 'closing') {
+        // For closing sweeps, use peakCutoff as starting position
+        const cutoffHz = fe.peakCutoff ?? fe.estimatedCutoff;
+        if (cutoffHz != null) analysisCutoff = hzToSemitones(cutoffHz);
+      } else if (fe.estimatedCutoff != null) {
+        analysisCutoff = hzToSemitones(fe.estimatedCutoff);
+      }
+    }
+    // Fallback: spectral centroid (systematically 2-3x above perceived cutoff)
+    if (analysisCutoff == null && features.spectralCentroid != null) {
+      const centroidHz = Number(features.spectralCentroid);
+      analysisCutoff = hzToSemitones(centroidHz * 0.4); // Reduced from 0.5 — centroid overshoots more than expected
+    }
+    // Last resort: brightness
+    if (analysisCutoff == null && features.brightness != null) {
+      const brightness = Number(features.brightness);
+      analysisCutoff = 25 + brightness * 95;
+    }
+
+    if (analysisCutoff != null) {
+      // Blend: 60% analysis, 40% curated preset — analysis should lead since we're matching source
+      const blended = analysisCutoff * 0.6 + presetCutoff * 0.4;
+      // Cap: allow up to 40 semitones above preset (was 20 — too restrictive for bright/distorted sounds)
+      const capped = Math.min(blended, presetCutoff + 40);
+      overrides.filter_cutoff = Math.round(Math.max(20, capped));
+    }
+  }
+
+  // --- Filter Resonance ---
+  // Blend analysis resonance with curated preset value.
+  // Analysis resonanceIndicator often reads high for bass (lots of harmonic energy near cutoff).
+  if (features.filterEnvelope?.resonanceIndicator != null) {
+    const res = Number(features.filterEnvelope.resonanceIndicator);
+    const presetRes = settings.filter_1_resonance ?? 0.3;
+    // Blend 40% analysis, 60% curated — resonance is very character-dependent
+    const blended = res * 0.4 + presetRes * 0.6;
+    overrides.filter_resonance = Math.round(Math.max(0, Math.min(0.85, blended)) * 100) / 100;
+  }
+
+  // --- ADSR Envelope ---
+  // Vital uses quartic scaling: displayed_time = raw_value^4 * max_time.
+  // To set a specific time in seconds: raw = (seconds / max_time)^0.25
+  // Max times (approximate): attack ≈ 4.27s, decay ≈ 4.27s, release ≈ 11.88s
+  // Sustain is linear 0-1 (no power curve).
+  const VITAL_MAX_ATTACK = 4.27;
+  const VITAL_MAX_DECAY = 4.27;
+  const VITAL_MAX_RELEASE = 11.88;
+  const secondsToVitalEnv = (seconds, maxTime) =>
+    Math.pow(Math.min(Math.max(seconds, 0), maxTime) / maxTime, 0.25);
+
+  if (features.adsr) {
+    const analysisAttack = Number(features.adsr.attack ?? 50) / 1000;   // ms → seconds
+    const analysisDecay = Number(features.adsr.decay ?? 300) / 1000;
+    const analysisSustain = Number(features.adsr.sustain ?? 0.5);       // already 0-1
+    const analysisRelease = Number(features.adsr.release ?? 300) / 1000;
+
+    // Convert to Vital's quartic-scaled 0-1 range
+    const vitalAttack = secondsToVitalEnv(analysisAttack, VITAL_MAX_ATTACK);
+    const vitalDecay = secondsToVitalEnv(analysisDecay, VITAL_MAX_DECAY);
+    const vitalRelease = secondsToVitalEnv(analysisRelease, VITAL_MAX_RELEASE);
+
+    // Blend 70% analysis / 30% curated preset — heavier analysis weight for closer matching
+    const presetAttack = settings.env_1_attack ?? 0.1;
+    const presetDecay = settings.env_1_decay ?? 0.4;
+    const presetSustain = settings.env_1_sustain ?? 0.6;
+    const presetRelease = settings.env_1_release ?? 0.3;
+
+    const blendedAttack = vitalAttack * 0.7 + presetAttack * 0.3;
+    const blendedDecay = vitalDecay * 0.7 + presetDecay * 0.3;
+    const blendedSustain = analysisSustain * 0.7 + presetSustain * 0.3;
+    const blendedRelease = vitalRelease * 0.7 + presetRelease * 0.3;
+
+    // Safety floors — sustain floor lowered to 0.05 so staccato bass (0% sustain) works
+    overrides.attack = Math.round(Math.max(0.01, blendedAttack) * 10000) / 10000;
+    overrides.decay = Math.round(Math.max(0.05, blendedDecay) * 10000) / 10000;
+    overrides.sustain = Math.round(Math.max(0.05, blendedSustain) * 100) / 100;
+    overrides.release = Math.round(Math.max(0.02, blendedRelease) * 10000) / 10000;
+  }
+
+  // --- Chorus ---
+  if (features.modulation) {
+    const hasChorus = !!features.modulation.hasChorus;
+    const chorusAmount = features.modulation.chorusAmount ?? 0;
+    if (hasChorus && chorusAmount > 0) {
+      overrides.chorus = Math.round(Math.min(1, chorusAmount * 1.5) * 100) / 100;
+    } else {
+      // If analysis detects NO chorus but preset has it, reduce it
+      const presetChorus = settings.chorus_dry_wet ?? 0;
+      if (presetChorus > 0.2) {
+        overrides.chorus = 0.05;
+      }
+    }
+  }
+
+  // --- Reverb ---
+  // Use release time + brightness to estimate spatial character
+  if (features.adsr?.release != null) {
+    const releaseMs = Number(features.adsr.release);
+    const brightness = Number(features.brightness ?? 0.3);
+    if (releaseMs > 300) {
+      // Longer release + brighter sounds suggest more reverb/space
+      const releaseContribution = Math.min(1, (releaseMs - 300) / 2000);
+      const brightnessContribution = brightness * 0.3;
+      const reverbAmount = Math.min(0.8, releaseContribution + brightnessContribution);
+      overrides.reverb = Math.round(reverbAmount * 100) / 100;
+    } else if (releaseMs < 100) {
+      // Very short release — dry, punchy sound
+      const presetReverb = settings.reverb_dry_wet ?? 0;
+      if (presetReverb > 0.3) {
+        overrides.reverb = 0.1;
+      }
+    }
+  }
+
+  // --- Analysis-Based Effects (raw overrides) ---
+  // ONLY tune effects that the curated preset already enables.
+  // Never add new effects the preset didn't configure — this preserves preset character.
+  // (e.g., a bass preset without reverb should stay dry, a pad with reverb gets tuned reverb)
+  {
+    const rawFx = {};
+    const brightness = Number(features.brightness ?? 0.3);
+    const releaseMs = Number(features.adsr?.release ?? 300);
+    const harmonicityVal = Number(features.harmonicity ?? 0.5);
+
+    // Reverb: only tune if the curated preset already has reverb enabled
+    const presetHasReverb = (settings.reverb_on === 1.0) || (settings.reverb_dry_wet > 0);
+    if (presetHasReverb) {
+      const presetSize = settings.reverb_size ?? 0.5;
+      const presetDryWet = settings.reverb_dry_wet ?? 0.3;
+      if (releaseMs > 500) {
+        // Longer release → larger/wetter reverb, blended with preset
+        const analysisSize = Math.min(0.85, 0.3 + (releaseMs - 500) / 3000);
+        rawFx.reverb_size = analysisSize * 0.4 + presetSize * 0.6;
+        const analysisDryWet = Math.min(0.6, 0.15 + (releaseMs - 500) / 4000);
+        rawFx.reverb_dry_wet = analysisDryWet * 0.4 + presetDryWet * 0.6;
+        rawFx.reverb_pre_high_cutoff = brightness > 0.5 ? 115.0 : 95.0;
+      } else if (releaseMs < 100) {
+        // Punchy sound — reduce preset's reverb but don't kill it
+        rawFx.reverb_dry_wet = Math.min(presetDryWet, 0.1);
+        rawFx.reverb_size = Math.min(presetSize, 0.2);
+      }
+    }
+
+    // Delay: only tune if the curated preset already has delay enabled
+    const presetHasDelay = (settings.delay_on === 1.0) || (settings.delay_dry_wet > 0);
+    if (presetHasDelay) {
+      const presetDelayWet = settings.delay_dry_wet ?? 0.2;
+      // Adjust delay wetness based on brightness
+      rawFx.delay_dry_wet = (presetDelayWet * 0.6) + (Math.min(0.25, brightness * 0.2) * 0.4);
+    }
+
+    // Distortion: only tune if the curated preset already has distortion enabled
+    const presetHasDistortion = (settings.distortion_on === 1.0);
+    if (presetHasDistortion) {
+      const presetDrive = settings.distortion_drive ?? 5.0;
+      const presetMix = settings.distortion_mix ?? 0.2;
+      // Dark/inharmonic sounds get more drive, bright/clean sounds get less
+      if (harmonicityVal < 0.3 || brightness < 0.15) {
+        rawFx.distortion_drive = Math.min(presetDrive + 2, 12.0);
+        rawFx.distortion_mix = Math.min(presetMix + 0.1, 0.5);
+      } else if (brightness > 0.6) {
+        rawFx.distortion_drive = Math.max(presetDrive - 2, 1.0);
+        rawFx.distortion_mix = Math.max(presetMix - 0.05, 0.05);
+      }
+    }
+
+    // EQ: only tune if the curated preset already has EQ enabled
+    const presetHasEQ = (settings.eq_on === 1.0);
+    if (presetHasEQ) {
+      const centroidHz = Number(features.spectralCentroid ?? 1000);
+      if (centroidHz < 300) {
+        rawFx.eq_low_gain = 4.0;
+        rawFx.eq_high_gain = -6.0;
+      } else if (centroidHz > 3000) {
+        rawFx.eq_low_gain = -3.0;
+        rawFx.eq_high_gain = 4.0;
+      } else {
+        rawFx.eq_band_gain = 2.5;
+        rawFx.eq_band_cutoff = Math.min(110, Math.max(40, hzToSemitones(centroidHz)));
+      }
+    }
+
+    if (Object.keys(rawFx).length > 0) {
+      overrides._rawOverrides = { ...(overrides._rawOverrides || {}), ...rawFx };
+    }
+  }
+
+  // --- Unison Voices / Detune ---
+  // Use modulation detection + harmonicity to infer width
+  const chorusAmount = features.modulation?.chorusAmount ?? 0;
+  const harmonicity = Number(features.harmonicity ?? 0.5);
+  if (chorusAmount > 0.15 || harmonicity < 0.3) {
+    // Wider/thicker sound — more unison voices
+    const voices = chorusAmount > 0.5 ? 5 : chorusAmount > 0.3 ? 4 : 3;
+    const detune = chorusAmount > 0.5 ? 4.0 : chorusAmount > 0.3 ? 3.0 : 2.0;
+    const presetVoices = settings.osc_1_unison_voices ?? 1;
+    if (voices > presetVoices) {
+      overrides.unison_voices = voices;
+      overrides.unison_detune = detune;
+    }
+  } else if (harmonicity > 0.7 && chorusAmount < 0.1) {
+    // Very clean/pure — reduce unison if preset has it
+    const presetVoices = settings.osc_1_unison_voices ?? 1;
+    if (presetVoices > 2) {
+      overrides.unison_voices = 1;
+      overrides.unison_detune = 0;
+    }
+  }
+
+  // --- Wave Frame (now user-adjustable via slider) ---
+  // Map detected waveform to Vital's osc_1_wave_frame (0-127) using continuous
+  // harmonic profile data (not snapped to 5 discrete types). computeWaveFrame()
+  // uses harmonic density, odd/even balance, and rolloff rate for smooth mapping.
+  const computedFrame = computeWaveFrame(features.waveform);
+  if (computedFrame != null) {
+    // Always apply the analysis-derived wave frame — the sweep will refine it further.
+    // Previous threshold of >15 frame distance was too conservative and caused the
+    // sweep to start from preset defaults instead of the analysis result.
+    overrides.wave_frame = computedFrame;
+  }
+
+  // --- Stereo Spread ---
+  // Wide sounds (chorus, detuned) get more spread; mono bass stays narrow
+  {
+    const presetSpread = settings.osc_1_stereo_spread ?? 0;
+    const ca = features.modulation?.chorusAmount ?? 0;
+    if (ca > 0.3 || (overrides.unison_voices && overrides.unison_voices >= 3)) {
+      overrides.stereo_spread = Math.round(Math.max(presetSpread, Math.min(1, 0.3 + ca * 0.5)) * 100) / 100;
+    } else if (preset.category === 'bass' || preset.category === 'kick') {
+      // Bass and kick should be mono or near-mono
+      overrides.stereo_spread = Math.min(presetSpread, 0.1);
+    }
+  }
+
+  // --- OSC 2 Level ---
+  // If preset uses OSC 2, expose its level for tuning
+  if (settings.osc_2_on === 1.0) {
+    const presetLevel = settings.osc_2_level ?? 0.5;
+    overrides.osc_2_level = presetLevel; // Set to preset's default so slider shows current state
+  }
+
+  // --- OSC 2 Transpose ---
+  // Expose for house/dance — sub octaves (-12, -24) or harmony (+7 fifth)
+  if (settings.osc_2_on === 1.0) {
+    const presetTranspose = settings.osc_2_transpose ?? 0;
+    overrides.osc_2_transpose = presetTranspose;
+  }
+
+  // --- Filter Drive ---
+  {
+    const presetDrive = settings.filter_1_drive ?? 0;
+    if (presetDrive > 0) {
+      overrides.filter_drive = presetDrive;
+    } else if (features.brightness != null) {
+      const brightness = Number(features.brightness);
+      // Dark/aggressive sounds benefit from filter drive
+      if (brightness < 0.2 && (preset.category === 'bass' || preset.category === 'lead')) {
+        overrides.filter_drive = 3.0;
+      }
+    }
+  }
+
+  // --- Distortion Drive & Mix ---
+  {
+    const presetHasDist = settings.distortion_on === 1.0;
+    if (presetHasDist) {
+      overrides.distortion_drive = settings.distortion_drive ?? 5.0;
+      overrides.distortion_mix = settings.distortion_mix ?? 0.2;
+    }
+  }
+
+  // --- Delay Mix ---
+  {
+    const presetHasDelay = (settings.delay_on === 1.0) || (settings.delay_dry_wet > 0);
+    if (presetHasDelay) {
+      overrides.delay_mix = settings.delay_dry_wet ?? 0.2;
+    }
+  }
+
+  // --- Reverb Size ---
+  {
+    const presetHasReverb = (settings.reverb_on === 1.0) || (settings.reverb_dry_wet > 0);
+    if (presetHasReverb) {
+      const presetSize = settings.reverb_size ?? 0.5;
+      overrides.reverb_size = presetSize;
+    }
+  }
+
+  // --- ENV 2 Decay (Filter Envelope) ---
+  // Key for acid bass, pluck filter sweeps, house stabs
+  {
+    const presetEnv2Decay = settings.env_2_decay;
+    if (presetEnv2Decay != null) {
+      overrides.env_2_decay = presetEnv2Decay;
+    } else if (features.filterEnvelope?.sweepDirection &&
+               features.filterEnvelope.sweepDirection !== 'stable') {
+      // Analysis detected filter movement — set a reasonable envelope decay
+      const brightness = Number(features.brightness ?? 0.3);
+      overrides.env_2_decay = brightness > 0.4 ? 0.8 : 0.3;
+    }
+  }
+
+  // --- LFO Rate ---
+  if (features.modulation?.lfoRate > 0) {
+    overrides.lfo_rate = Math.round(Math.max(0.1, Math.min(20, features.modulation.lfoRate)) * 10) / 10;
+  }
+
+  // --- Glide / Portamento ---
+  // 808 slides, smooth leads
+  {
+    const presetGlide = settings.portamento_time ?? 0;
+    if (presetGlide > 0) {
+      overrides.glide = presetGlide;
+    } else if (preset.category === 'bass' && preset.id?.includes('808')) {
+      // 808 presets commonly need glide for slides
+      overrides.glide = 0.15;
+    }
+  }
+
+  // --- Oscillator Wave Frame (raw Vital settings for OSC 2 sync) ---
+  const rawOverrides = {};
+  const modRoutes = []; // { slot, source, destination, amount, bipolar }
+
+  // Sync OSC 2 wave frame with OSC 1 when the wave_frame slider changed OSC 1
+  if (overrides.wave_frame != null && settings.osc_2_on && settings.osc_2_wave_frame != null) {
+    const presetFrame = settings.osc_1_wave_frame ?? 64;
+    // If OSC 2 was matching OSC 1's family, keep them in sync
+    if (Math.abs(settings.osc_2_wave_frame - presetFrame) < 20) {
+      rawOverrides.osc_2_wave_frame = overrides.wave_frame;
+    }
+  }
+
+  // --- LFO Modulation Routing ---
+  // When analysis detects LFO/tremolo/vibrato, route LFO 1 in Vital's mod matrix.
+  // Uses modulation slots 7-9 (slots 1-3 for kick LFO, slots 4-6 for category routing).
+  if (features.modulation?.lfoRate > 0) {
+    // LFO frequency is set via the lfo_rate slider — only raw config params here
+    rawOverrides.lfo_1_sync = 0.0;       // Free-running (not tempo-synced)
+    rawOverrides.lfo_1_sync_type = 0.0;   // Trigger mode
+    rawOverrides.lfo_1_smooth_mode = 1.0; // Smooth the LFO shape
+    rawOverrides.lfo_1_smooth_time = -5.0;
+
+    // Tremolo (amplitude modulation): route LFO 1 → osc_1_level
+    const tremoloDepth = Number(features.modulation.tremoloDepth ?? 0);
+    if (tremoloDepth > 0.01) {
+      // Scale: tremoloDepth 0-1 → mod amount 0-0.5 (full depth would silence the osc)
+      const amount = Math.min(0.5, tremoloDepth * 0.6);
+      modRoutes.push({
+        slot: 7,
+        source: 'lfo_1',
+        destination: 'osc_1_level',
+        amount,
+        bipolar: 0,
+      });
+    }
+
+    // Vibrato (pitch modulation): route LFO 1 → osc_1_transpose
+    const vibratoDepth = Number(features.modulation.vibratoDepth ?? 0);
+    if (vibratoDepth > 0.01) {
+      // Scale: vibratoDepth 0-1 → mod amount 0-0.08 (subtle — even 0.05 is ~1 semitone)
+      const amount = Math.min(0.08, vibratoDepth * 0.1);
+      modRoutes.push({
+        slot: 8,
+        source: 'lfo_1',
+        destination: 'osc_1_transpose',
+        amount,
+        bipolar: 1,  // Vibrato oscillates above and below pitch
+      });
+    }
+  }
+
+  // --- Filter Envelope Influence ---
+  // When analysis detects a filter sweep, adjust the blended filter cutoff slightly
+  // toward the sweep characteristics. But do NOT override ENV 2 timing or add
+  // additional modulation routes — the category modulation routing (slot 4: ENV 2 →
+  // filter_1_cutoff) already provides filter movement with well-tuned timing.
+  // Overriding ENV 2 with analysis values caused near-silent presets (slow attack,
+  // low sustain = filter barely opens).
+  if (features.filterEnvelope?.sweepDirection &&
+      features.filterEnvelope.sweepDirection !== 'stable') {
+    const fe = features.filterEnvelope;
+    const peakCutoffHz = Number(fe.peakCutoff ?? fe.estimatedCutoff ?? 2000);
+    const minCutoffHz = Number(fe.minCutoff ?? fe.estimatedCutoff ?? 200);
+    const peakSemi = hzToSemitones(peakCutoffHz);
+    const minSemi = hzToSemitones(minCutoffHz);
+
+    // Use the midpoint of the detected sweep range as an influence on the filter cutoff,
+    // blended with the already-computed blended cutoff. This nudges the base position
+    // without slamming it to the minimum (which made presets inaudible).
+    const sweepMid = (peakSemi + minSemi) / 2;
+    const currentCutoff = overrides.filter_cutoff ?? presetCutoff;
+    // Blend 30% sweep influence, 70% existing blended value
+    const nudgedCutoff = sweepMid * 0.3 + currentCutoff * 0.7;
+    // Never go below the curated preset's cutoff minus 10 semitones (safety floor)
+    overrides.filter_cutoff = Math.round(Math.max(presetCutoff - 10, nudgedCutoff));
+  }
+
+  // --- Enhanced Unison from Chorus Detection ---
+  // Override the slider-based unison with more granular raw settings when chorus is strong
+  if (features.modulation) {
+    const ca = features.modulation.chorusAmount ?? 0;
+    if (ca > 0.15) {
+      // Map chorus amount to detune: 0.15-1.0 → 1.5-5.0
+      const detune = 1.5 + (Math.min(1, ca) - 0.15) * (5.0 - 1.5) / 0.85;
+      rawOverrides.osc_1_unison_detune = Math.round(detune * 10) / 10;
+
+      // More chorus → more voices via raw override (bypasses slider clamping)
+      if (ca > 0.6) {
+        rawOverrides.osc_1_unison_voices = Math.max(settings.osc_1_unison_voices ?? 1, 5);
+      } else if (ca > 0.3) {
+        rawOverrides.osc_1_unison_voices = Math.max(settings.osc_1_unison_voices ?? 1, 3);
+      }
+    }
+  }
+
+  // --- Assemble _rawOverrides and _modulations ---
+  // Merge oscillator/modulation rawOverrides with effects rawOverrides (from earlier)
+  // instead of replacing — the rawFx section already set some _rawOverrides.
+  if (Object.keys(rawOverrides).length > 0) {
+    overrides._rawOverrides = { ...(overrides._rawOverrides || {}), ...rawOverrides };
+  }
+  if (modRoutes.length > 0) {
+    overrides._modulations = modRoutes;
+  }
+
+  return overrides;
+}
+
+// =============================================================================
+// Harmonic-Profile-Based Wavetable Frame Mapping
+// =============================================================================
+
+/**
+ * Compute a continuous Vital wave frame (0-127) from waveform analysis data.
+ * Uses harmonic profile when available for precise mapping, falls back to type.
+ *
+ * Vital's default wavetable sweeps roughly:
+ *   0 = pure sine, ~32 = triangle, ~64 = sawtooth, ~96 = square, ~127 = narrow pulse
+ *
+ * @param {Object} waveform - features.waveform from the worker
+ * @returns {number|null} Wave frame 0-127, or null if undetermined
+ */
+function computeWaveFrame(waveform) {
+  if (!waveform) return null;
+
+  // If we have a harmonic profile, compute a continuous frame from harmonic characteristics
+  if (waveform.harmonicProfile && waveform.harmonicProfile.length >= 3) {
+    const profile = waveform.harmonicProfile;
+    const amps = profile.map(h => (h.amplitude ?? 0) / 100); // Normalize 0-1
+
+    // Count significant harmonics (amplitude > 5%)
+    const significantCount = amps.filter(a => a > 0.05).length;
+    const totalHarmonics = amps.length;
+
+    // Compute odd/even balance: odd harmonics (1,3,5,7) vs even (2,4,6,8)
+    let oddSum = 0, evenSum = 0;
+    for (let i = 0; i < amps.length; i++) {
+      const harmonicNum = i + 1; // harmonic 1 = fundamental
+      if (harmonicNum === 1) continue; // Skip fundamental for balance calc
+      if (harmonicNum % 2 === 1) oddSum += amps[i];
+      else evenSum += amps[i];
+    }
+    const totalOvertones = oddSum + evenSum;
+    const oddRatio = totalOvertones > 0.01 ? oddSum / totalOvertones : 0.5;
+
+    // Compute rolloff rate: how quickly harmonics decay
+    // Steep rolloff → sine/triangle, gentle rolloff → saw/square
+    let rolloff = 0;
+    if (amps[0] > 0.01 && significantCount >= 2) {
+      // Average ratio of each harmonic to the previous one
+      let ratioSum = 0, ratioCount = 0;
+      for (let i = 1; i < Math.min(amps.length, 6); i++) {
+        if (amps[i - 1] > 0.02) {
+          ratioSum += amps[i] / amps[i - 1];
+          ratioCount++;
+        }
+      }
+      rolloff = ratioCount > 0 ? ratioSum / ratioCount : 0;
+      // rolloff: 0 = instant drop (sine), ~0.5 = moderate (triangle), ~0.8+ = gentle (saw/square)
+    }
+
+    // Decision tree to map to continuous wave frame:
+    // Pure sine: only fundamental, no significant overtones → 0
+    if (significantCount <= 1) return 0;
+
+    // Triangle-like: mostly odd harmonics, steep rolloff (1/n^2)
+    // Saw-like: all harmonics, moderate rolloff (1/n)
+    // Square-like: mostly odd harmonics, gentle rolloff (1/n)
+    // Pulse-like: all harmonics, very gentle rolloff
+
+    if (oddRatio > 0.7) {
+      // Predominantly odd harmonics → square or triangle family
+      if (rolloff < 0.35) {
+        // Steep rolloff + odd harmonics → triangle (frame ~20-45)
+        return Math.round(20 + rolloff * 70); // 20-45 range
+      } else {
+        // Gentle rolloff + odd harmonics → square (frame ~80-110)
+        const squareFrame = 80 + (rolloff - 0.35) * 46; // 80-110
+        return Math.round(Math.min(110, squareFrame));
+      }
+    } else {
+      // Mixed odd/even harmonics → saw or pulse family
+      if (rolloff < 0.5) {
+        // Moderate rolloff + mixed harmonics → triangle-saw blend (frame ~35-65)
+        return Math.round(35 + rolloff * 60); // 35-65
+      } else if (rolloff < 0.75) {
+        // Gentle rolloff + mixed harmonics → sawtooth (frame ~55-80)
+        return Math.round(55 + (rolloff - 0.5) * 100); // 55-80
+      } else {
+        // Very gentle rolloff + mixed harmonics → pulse-like (frame ~95-120)
+        const pulseFrame = 95 + (rolloff - 0.75) * 100; // 95-120
+        return Math.round(Math.min(120, pulseFrame));
+      }
+    }
+  }
+
+  // Fallback: type-based mapping (6 fixed values)
+  if (waveform.type) {
+    const waveFrameMap = {
+      sine: 0,
+      triangle: 32,
+      saw: 64,
+      square: 96,
+      pulse: 108,
+      complex: null,
+    };
+    return waveFrameMap[waveform.type] ?? null;
+  }
+
+  return null;
 }
 
 // =============================================================================

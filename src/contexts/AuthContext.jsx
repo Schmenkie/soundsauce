@@ -4,6 +4,20 @@ import { identifyUser, resetUser, trackSignIn, trackSignUp, trackSignOut } from 
 
 const AuthContext = createContext(null);
 
+/** Fire-and-forget welcome email to new users */
+async function sendWelcomeEmail(email, username) {
+  if (!email) return;
+  try {
+    await fetch('/api/send-feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'welcome', email, username }),
+    });
+  } catch {
+    // Silent fail — welcome email is non-critical
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -21,6 +35,14 @@ export function AuthProvider({ children }) {
         // Track auth events
         if (event === 'SIGNED_IN' && session?.user) {
           const method = session.user.app_metadata?.provider === 'google' ? 'google' : 'email';
+          // Detect new signups: if account was created within the last 60 seconds, it's a signup
+          const createdAt = new Date(session.user.created_at);
+          const isNewAccount = (Date.now() - createdAt.getTime()) < 60000;
+          if (isNewAccount) {
+            trackSignUp(method);
+            // Send welcome email (fire-and-forget, don't block auth flow)
+            sendWelcomeEmail(session.user.email, session.user.user_metadata?.username || session.user.user_metadata?.name);
+          }
           trackSignIn(method);
         }
         setLoading(false);

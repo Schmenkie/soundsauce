@@ -19,6 +19,7 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { rateLimit } from './_rateLimit.js';
 import { validateServerEnv } from './_validateEnv.js';
+import { posthog, getDistinctId } from './_posthog.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -50,8 +51,7 @@ const ALLOWED_ORIGINS = [
 function getSafeOrigin(reqOrigin) {
   if (!reqOrigin) return 'https://soundsauce.app';
   if (ALLOWED_ORIGINS.includes(reqOrigin)) return reqOrigin;
-  // Allow localhost in development
-  if (reqOrigin.includes('localhost')) return reqOrigin;
+  if (/^https?:\/\/localhost(:\d+)?$/.test(reqOrigin)) return reqOrigin;
   return 'https://soundsauce.app';
 }
 
@@ -134,8 +134,21 @@ export default async function handler(req, res) {
       },
     });
 
+    const tier = TIER_TO_PRICE[rawPriceId] ? rawPriceId : 'pro';
+    posthog.capture({
+      distinctId: getDistinctId(req, user.id),
+      event: 'checkout_session_created',
+      properties: {
+        tier,
+        price_id: priceId,
+        stripe_customer_id: stripeCustomerId,
+        $set: { email: user.email },
+      },
+    });
+
     return res.status(200).json({ url: session.url });
   } catch (error) {
+    posthog.captureException(error, getDistinctId(req));
     console.error('Create checkout error:', error);
     return res.status(500).json({ error: 'Failed to create checkout session' });
   }

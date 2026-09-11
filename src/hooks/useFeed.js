@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-const FEED_COLUMNS = 'id, title, description, tags, instrument, post_type, vital_preset_url, is_featured, results, created_at, like_count, comment_count, download_count, profiles:user_id(username, display_name, avatar_url)';
+const FEED_COLUMNS = 'id, title, description, tags, instrument, post_type, vital_preset_url, audio_url, is_featured, results, created_at, like_count, comment_count, download_count, profiles:user_id(username, display_name, avatar_url)';
 const FEED_LIMIT = 10;
 
 /**

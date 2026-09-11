@@ -1,80 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAudioWorker } from './useAudioWorker';
 
-/**
- * Fast Fourier Transform (Cooley-Tukey radix-2 DIT algorithm)
- * O(n log n) vs O(n²) for DFT - critical for performance
- */
-function fft(real, imag) {
-  const n = real.length;
-  if (n <= 1) return;
-
-  // Bit-reversal permutation
-  for (let i = 0, j = 0; i < n; i++) {
-    if (i < j) {
-      [real[i], real[j]] = [real[j], real[i]];
-      [imag[i], imag[j]] = [imag[j], imag[i]];
-    }
-    let m = n >> 1;
-    while (m >= 1 && j >= m) {
-      j -= m;
-      m >>= 1;
-    }
-    j += m;
-  }
-
-  // Cooley-Tukey iterative FFT
-  for (let len = 2; len <= n; len <<= 1) {
-    const halfLen = len >> 1;
-    const angle = -2 * Math.PI / len;
-    const wReal = Math.cos(angle);
-    const wImag = Math.sin(angle);
-
-    for (let i = 0; i < n; i += len) {
-      let curReal = 1, curImag = 0;
-      for (let j = 0; j < halfLen; j++) {
-        const idx1 = i + j;
-        const idx2 = i + j + halfLen;
-        const tReal = curReal * real[idx2] - curImag * imag[idx2];
-        const tImag = curReal * imag[idx2] + curImag * real[idx2];
-        real[idx2] = real[idx1] - tReal;
-        imag[idx2] = imag[idx1] - tImag;
-        real[idx1] += tReal;
-        imag[idx1] += tImag;
-        const newCurReal = curReal * wReal - curImag * wImag;
-        curImag = curReal * wImag + curImag * wReal;
-        curReal = newCurReal;
-      }
-    }
-  }
-}
-
-/**
- * Compute magnitude spectrum using FFT
- * Returns array of magnitudes for positive frequencies
- */
-function computeMagnitudeSpectrum(data, windowSize) {
-  // Ensure power of 2 for FFT
-  const n = windowSize;
-  const real = new Float32Array(n);
-  const imag = new Float32Array(n);
-
-  // Apply Hann window and copy data
-  for (let i = 0; i < n && i < data.length; i++) {
-    const hannWindow = 0.5 * (1 - Math.cos(2 * Math.PI * i / n));
-    real[i] = data[i] * hannWindow;
-  }
-
-  fft(real, imag);
-
-  // Compute magnitudes for positive frequencies
-  const magnitudes = new Float32Array(n / 2);
-  for (let i = 0; i < n / 2; i++) {
-    magnitudes[i] = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
-  }
-
-  return magnitudes;
-}
+// NOTE: FFT (fft, computeMagnitudeSpectrum) previously lived here but was removed
+// as a duplicate of the Web Worker implementation. All FFT-based analysis
+// (frequency bands, instrument detection) now runs in audio.worker.js.
 
 /**
  * Custom hook for audio processing, playback, and analysis.
@@ -124,6 +53,7 @@ export function useAudioProcessor() {
 
   // Function ref for recursive callback
   const playAudioBufferRef = useRef(null);
+  const stoppedManuallyRef = useRef(false); // Distinguish user stop from natural loop end
 
   // Performance optimization: refs for high-frequency visualization data
   // These are updated every frame, but state is only updated periodically
@@ -294,7 +224,7 @@ export function useAudioProcessor() {
     const dataArray = new Uint8Array(bufferLength);
 
     const draw = () => {
-      if (!sourceRef.current) return;
+      if (!sourceRef.current || !isPlayingRef.current) return;
 
       animationRef.current = requestAnimationFrame(draw);
 
@@ -391,7 +321,13 @@ export function useAudioProcessor() {
 
     // Handle playback end
     sourceRef.current.onended = () => {
-      // Check if we should loop
+      // If user manually stopped (Space/pause), don't restart the loop
+      if (stoppedManuallyRef.current) {
+        stoppedManuallyRef.current = false;
+        return;
+      }
+
+      // Check if we should loop (natural end of loop region)
       if (loopEnabledRef.current && loopStartRef.current !== null && loopEndRef.current !== null) {
         // Use ref to get the latest version of playAudioBuffer
         if (playAudioBufferRef.current) {
@@ -400,7 +336,9 @@ export function useAudioProcessor() {
         return;
       }
 
+      isPlayingRef.current = false;
       setIsPlaying(false);
+      playbackTimeRef.current = 0;
       setPlaybackTime(0);
       setSpectrumData([]);
       setBrightness(0);
@@ -422,6 +360,7 @@ export function useAudioProcessor() {
       sourceRef.current.start(0, clampedStart);
     }
 
+    isPlayingRef.current = true;
     setIsPlaying(true);
     setPlaybackTime(clampedStart);
 
@@ -445,7 +384,8 @@ export function useAudioProcessor() {
       const ctx = await getAudioContext();
 
       if (isPlayingRef.current) {
-        // Stop playback
+        // Stop playback — set flag before .stop() so onended doesn't restart the loop
+        stoppedManuallyRef.current = true;
         if (sourceRef.current) {
           try {
             sourceRef.current.stop();
@@ -455,6 +395,7 @@ export function useAudioProcessor() {
           sourceRef.current.disconnect();
           sourceRef.current = null;
         }
+        isPlayingRef.current = false;
         setIsPlaying(false);
         setSpectrumData([]);
         setBrightness(0);
@@ -471,24 +412,35 @@ export function useAudioProcessor() {
           audioBufferRef.current = decoded;
           audioBufferSourceRef.current = audioFileData;
           durationRef.current = decoded.duration;
-          // Only update waveform/duration state for main audio, not stem previews
-          if (!audioBufferSourceRef.current || isNewAudioSource) {
-            setAudioBuffer(decoded);
-            setDuration(decoded.duration);
-          }
+          // Update waveform/duration state whenever the audio source changes so
+          // the waveform display stays in sync with the currently playing audio
+          // (e.g. switching between a stem and the full mix).
+          setAudioBuffer(decoded);
+          setDuration(decoded.duration);
+          setWaveformData(generateWaveform(decoded));
 
           playbackTimeRef.current = 0;
           playAudioBuffer(decoded, 0);
         } else {
-          const startPos = loopEnabledRef.current && loopStartRef.current !== null
-            ? loopStartRef.current
-            : playbackTimeRef.current;
+          // Resume from current position. If we're past the end (or past loop end),
+          // restart from loop start (if looping) or beginning.
+          let startPos = playbackTimeRef.current;
+          if (loopEnabledRef.current && loopStartRef.current !== null && loopEndRef.current !== null) {
+            // If paused position is outside the loop region, restart from loop start
+            if (startPos < loopStartRef.current || startPos >= loopEndRef.current) {
+              startPos = loopStartRef.current;
+            }
+          } else if (startPos >= durationRef.current - 0.05) {
+            // Past the end of audio, restart from beginning
+            startPos = 0;
+          }
           playAudioBuffer(audioBufferRef.current, startPos);
         }
       }
 
       return { error: null };
     } catch {
+      isPlayingRef.current = false;
       setIsPlaying(false);
       return { error: 'Error playing audio' };
     }
@@ -610,289 +562,9 @@ export function useAudioProcessor() {
     durationRef.current = 0;
   }, [clearLoop]);
 
-  /**
-   * Find attack time in audio data.
-   */
-  const findAttackTime = useCallback((data, sampleRate) => {
-    const threshold = 0.05;
-    let start = -1;
-    let peak = 0;
-    let peakIndex = 0;
-
-    for (let i = 0; i < Math.min(data.length, sampleRate); i++) {
-      const abs = Math.abs(data[i]);
-      if (abs > threshold && start === -1) start = i;
-      if (abs > peak) {
-        peak = abs;
-        peakIndex = i;
-      }
-    }
-
-    if (start === -1 || peakIndex === start) return 0;
-    return ((peakIndex - start) / sampleRate) * 1000;
-  }, []);
-
-  /**
-   * Analyze frequency band energy distribution using FFT.
-   * Returns energy in each frequency band as a ratio of total energy.
-   */
-  const analyzeFrequencyBands = useCallback((channelData, sampleRate) => {
-    // Use power of 2 for FFT efficiency
-    const windowSize = Math.min(4096, channelData.length);
-    const data = channelData.slice(0, windowSize);
-
-    // Define frequency bands (in Hz)
-    const bands = {
-      subBass: { min: 20, max: 60 },
-      bass: { min: 60, max: 250 },
-      lowMid: { min: 250, max: 500 },
-      mid: { min: 500, max: 2000 },
-      highMid: { min: 2000, max: 6000 },
-      high: { min: 6000, max: 20000 }
-    };
-
-    const freqResolution = sampleRate / windowSize;
-    const bandEnergy = {};
-
-    // Use FFT instead of O(n²) DFT
-    const magnitudes = computeMagnitudeSpectrum(data, windowSize);
-
-    let totalEnergy = 0;
-    for (let i = 0; i < magnitudes.length; i++) {
-      totalEnergy += magnitudes[i];
-    }
-
-    // Calculate energy in each band
-    for (const [bandName, range] of Object.entries(bands)) {
-      const minBin = Math.floor(range.min / freqResolution);
-      const maxBin = Math.min(Math.ceil(range.max / freqResolution), windowSize / 2 - 1);
-
-      let bandSum = 0;
-      for (let i = minBin; i <= maxBin; i++) {
-        bandSum += magnitudes[i];
-      }
-      bandEnergy[bandName] = totalEnergy > 0 ? bandSum / totalEnergy : 0;
-    }
-
-    return bandEnergy;
-  }, []);
-
-  /**
-   * Analyze temporal envelope characteristics.
-   */
-  const analyzeEnvelope = useCallback((channelData, sampleRate) => {
-    const blockSize = Math.floor(sampleRate / 100); // 10ms blocks
-    const numBlocks = Math.floor(channelData.length / blockSize);
-    const envelope = [];
-
-    for (let i = 0; i < numBlocks; i++) {
-      let sum = 0;
-      for (let j = 0; j < blockSize; j++) {
-        sum += Math.abs(channelData[i * blockSize + j]);
-      }
-      envelope.push(sum / blockSize);
-    }
-
-    if (envelope.length === 0) return { decay: 0, sustain: 0, isPercussive: false };
-
-    const peak = Math.max(...envelope);
-    const peakIndex = envelope.indexOf(peak);
-
-    // Calculate decay rate (how quickly it falls from peak)
-    let decaySum = 0;
-    let decayCount = 0;
-    for (let i = peakIndex + 1; i < Math.min(peakIndex + 20, envelope.length); i++) {
-      decaySum += (envelope[i - 1] - envelope[i]) / peak;
-      decayCount++;
-    }
-    const decayRate = decayCount > 0 ? decaySum / decayCount : 0;
-
-    // Calculate sustain level (average level in latter half)
-    const latterHalf = envelope.slice(Math.floor(envelope.length / 2));
-    const sustainLevel = latterHalf.length > 0
-      ? latterHalf.reduce((a, b) => a + b, 0) / latterHalf.length / peak
-      : 0;
-
-    // Is it percussive? (fast attack, quick decay)
-    const isPercussive = peakIndex < 5 && decayRate > 0.05;
-
-    return { decayRate, sustainLevel, isPercussive };
-  }, []);
-
-  /**
-   * Detect which instruments are likely present in the audio.
-   * Returns an array of detected instruments with confidence scores.
-   */
-  const detectInstruments = useCallback((channelData, sampleRate) => {
-    // Get frequency band distribution
-    const bands = analyzeFrequencyBands(channelData, sampleRate);
-
-    // Get envelope characteristics
-    const envelope = analyzeEnvelope(channelData, sampleRate);
-
-    // Get basic features
-    const attackTime = findAttackTime(channelData, sampleRate);
-
-    // Calculate zero crossing rate for harmonicity
-    let zeroCrossings = 0;
-    for (let i = 1; i < channelData.length; i++) {
-      if ((channelData[i] >= 0 && channelData[i - 1] < 0) ||
-          (channelData[i] < 0 && channelData[i - 1] >= 0)) {
-        zeroCrossings++;
-      }
-    }
-    const zcr = zeroCrossings / channelData.length;
-    const harmonicity = 1 - Math.min(zcr * 50, 1);
-
-    // Instrument scoring based on characteristics
-    const scores = {
-      kick: 0,
-      bass: 0,
-      'sub-bass': 0,
-      lead: 0,
-      pad: 0,
-      pluck: 0
-    };
-
-    // KICK: Very low freq, fast attack, percussive, short
-    scores.kick += bands.subBass * 3;
-    scores.kick += bands.bass * 1.5;
-    scores.kick += envelope.isPercussive ? 2 : 0;
-    scores.kick += attackTime < 10 ? 2 : attackTime < 30 ? 1 : 0;
-    scores.kick += envelope.decayRate > 0.03 ? 1.5 : 0;
-    scores.kick -= bands.mid * 2;
-    scores.kick -= bands.high * 2;
-    scores.kick -= envelope.sustainLevel > 0.3 ? 2 : 0;
-
-    // BASS: Low freq dominant, moderate attack, sustained
-    scores.bass += bands.bass * 3;
-    scores.bass += bands.subBass * 1.5;
-    scores.bass += bands.lowMid * 1;
-    scores.bass += harmonicity > 0.6 ? 1.5 : 0;
-    scores.bass += envelope.sustainLevel > 0.2 ? 1 : 0;
-    scores.bass -= bands.high * 2;
-    scores.bass -= envelope.isPercussive ? 1 : 0;
-
-    // SUB-BASS: Very low freq, high harmonicity, sustained
-    scores['sub-bass'] += bands.subBass * 4;
-    scores['sub-bass'] += harmonicity > 0.7 ? 2 : 0;
-    scores['sub-bass'] += envelope.sustainLevel > 0.3 ? 1.5 : 0;
-    scores['sub-bass'] -= bands.mid * 2;
-    scores['sub-bass'] -= bands.highMid * 2;
-    scores['sub-bass'] -= bands.high * 3;
-    scores['sub-bass'] -= envelope.isPercussive ? 2 : 0;
-
-    // LEAD: Mid-high freq, varied attack, harmonic, melodic range
-    scores.lead += bands.mid * 2.5;
-    scores.lead += bands.highMid * 2;
-    scores.lead += bands.lowMid * 1;
-    scores.lead += harmonicity > 0.5 ? 1.5 : 0;
-    scores.lead += (attackTime > 0 && attackTime < 50) ? 1 : 0;
-    scores.lead -= bands.subBass * 2;
-
-    // PAD: Wide frequency, very slow attack, sustained, harmonic
-    scores.pad += attackTime > 100 ? 3 : attackTime > 50 ? 1.5 : 0;
-    scores.pad += envelope.sustainLevel > 0.5 ? 2 : envelope.sustainLevel > 0.3 ? 1 : 0;
-    scores.pad += harmonicity > 0.6 ? 1.5 : 0;
-    scores.pad += (bands.lowMid + bands.mid + bands.highMid) > 0.4 ? 1.5 : 0;
-    scores.pad -= envelope.isPercussive ? 3 : 0;
-    scores.pad -= envelope.decayRate > 0.05 ? 2 : 0;
-
-    // PLUCK: Fast attack, quick decay, mid freq, harmonic
-    scores.pluck += attackTime < 15 ? 2.5 : attackTime < 30 ? 1.5 : 0;
-    scores.pluck += envelope.decayRate > 0.02 ? 2 : 0;
-    scores.pluck += bands.mid * 2;
-    scores.pluck += bands.highMid * 1.5;
-    scores.pluck += harmonicity > 0.5 ? 1 : 0;
-    scores.pluck += envelope.sustainLevel < 0.3 ? 1.5 : 0;
-    scores.pluck -= envelope.sustainLevel > 0.5 ? 2 : 0;
-    scores.pluck -= attackTime > 50 ? 2 : 0;
-
-    // Define expected characteristics for each instrument for feature matching
-    const instrumentProfiles = {
-      kick: { minScore: 3, idealAttack: 5, idealBands: ['subBass', 'bass'] },
-      bass: { minScore: 3, idealAttack: 20, idealBands: ['bass', 'subBass', 'lowMid'] },
-      'sub-bass': { minScore: 3, idealAttack: 30, idealBands: ['subBass'] },
-      lead: { minScore: 2.5, idealAttack: 25, idealBands: ['mid', 'highMid'] },
-      pad: { minScore: 2.5, idealAttack: 150, idealBands: ['lowMid', 'mid', 'highMid'] },
-      pluck: { minScore: 3, idealAttack: 10, idealBands: ['mid', 'highMid'] }
-    };
-
-    // Calculate both relative and absolute confidence
-    const maxScore = Math.max(...Object.values(scores), 1);
-    const scoreValues = Object.values(scores);
-    const avgScore = scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length;
-    const detected = [];
-
-    for (const [instrument, score] of Object.entries(scores)) {
-      const profile = instrumentProfiles[instrument];
-
-      // Relative confidence (how much better than others)
-      const relativeConf = score / maxScore;
-
-      // Absolute confidence (does it meet minimum thresholds)
-      const meetsMinimum = score >= profile.minScore;
-
-      // Feature match bonus: how well do the bands match expected profile
-      let bandMatchScore = 0;
-      for (const idealBand of profile.idealBands) {
-        bandMatchScore += bands[idealBand] || 0;
-      }
-      const bandMatch = Math.min(1, bandMatchScore / (profile.idealBands.length * 0.15));
-
-      // Attack time match (closer to ideal = better)
-      const attackDiff = Math.abs(attackTime - profile.idealAttack);
-      const attackMatch = Math.max(0, 1 - attackDiff / 200);
-
-      // Combined confidence with multiple factors
-      let confidence = 0;
-      if (meetsMinimum) {
-        // Base: relative score (40%)
-        confidence += relativeConf * 0.4;
-        // Band profile match (30%)
-        confidence += bandMatch * 0.3;
-        // Attack time match (15%)
-        confidence += attackMatch * 0.15;
-        // Separation from average (15%)
-        const separation = (score - avgScore) / (maxScore - avgScore + 0.001);
-        confidence += Math.max(0, separation) * 0.15;
-      } else {
-        // Below minimum threshold - reduced confidence
-        confidence = relativeConf * 0.5 * (score / profile.minScore);
-      }
-
-      confidence = Math.max(0, Math.min(1, confidence));
-
-      if (confidence > 0.25) { // Lowered threshold since we're more selective now
-        detected.push({
-          instrument,
-          confidence: Math.round(confidence * 100),
-          score: score.toFixed(2),
-          bandMatch: Math.round(bandMatch * 100),
-          attackMatch: Math.round(attackMatch * 100)
-        });
-      }
-    }
-
-    // Sort by confidence descending
-    detected.sort((a, b) => b.confidence - a.confidence);
-
-    // Improved full mix detection
-    const isFullMix = detected.length >= 3 &&
-      detected[0].confidence - detected[2].confidence < 25 &&
-      detected[0].confidence < 70; // Top instrument not dominant
-
-    return {
-      detected,
-      isFullMix,
-      bands,
-      envelope: {
-        decayRate: envelope.decayRate.toFixed(3),
-        sustainLevel: envelope.sustainLevel.toFixed(3),
-        isPercussive: envelope.isPercussive
-      }
-    };
-  }, [analyzeFrequencyBands, analyzeEnvelope, findAttackTime]);
+  // NOTE: findAttackTime, analyzeFrequencyBands, analyzeEnvelope, and detectInstruments
+  // previously lived here but were removed as duplicates of the Web Worker implementation.
+  // All instrument detection and frequency analysis now runs in audio.worker.js.
 
   // NOTE: BPM, key, ADSR, filter envelope, modulation, waveform detection, and spectral match
   // are all handled by the Web Worker. See: src/workers/audio.worker.js
@@ -1104,7 +776,6 @@ export function useAudioProcessor() {
     reset,
     analyzeAudio,
     prepareAudioBuffer,
-    detectInstruments,
     detectInstrumentsFromAudioData,
     cleanup,
 
@@ -1114,6 +785,7 @@ export function useAudioProcessor() {
     // Utilities
     formatTime,
     generateWaveform,
-    generateWaveformData: worker.generateWaveformData
+    generateWaveformData: worker.generateWaveformData,
+    extractWavetable: worker.extractWavetable
   };
 }

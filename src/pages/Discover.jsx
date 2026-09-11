@@ -140,8 +140,8 @@ export function Discover({ theme, t }) {
             className={`flex-1 bg-transparent outline-none ${t.text} ${isDark ? 'placeholder:text-zinc-500' : 'placeholder:text-stone-400'}`}
           />
           {inputValue && (
-            <button onClick={handleClearSearch} className={`flex-shrink-0 ${t.textMuted}`}>
-              <X className="w-4 h-4" />
+            <button onClick={handleClearSearch} aria-label="Clear search" className={`flex-shrink-0 ${t.textMuted}`}>
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           )}
         </div>

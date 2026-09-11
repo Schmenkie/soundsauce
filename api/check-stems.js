@@ -11,6 +11,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { createHmac } from 'crypto';
 import { rateLimit } from './_rateLimit.js';
 
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
@@ -39,8 +40,8 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  const jwtToken = authHeader.replace('Bearer ', '');
+  const { data: { user }, error: authError } = await supabase.auth.getUser(jwtToken);
 
   if (authError || !user) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -52,7 +53,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Stem separation service not configured' });
   }
 
-  const { id } = req.query;
+  const { id, token } = req.query;
 
   if (!id) {
     return res.status(400).json({ error: 'Prediction ID required' });
@@ -61,6 +62,19 @@ export default async function handler(req, res) {
   // Validate prediction ID format (alphanumeric, 20-40 chars)
   if (!PREDICTION_ID_REGEX.test(id)) {
     return res.status(400).json({ error: 'Invalid prediction ID format' });
+  }
+
+  // Verify HMAC ownership token to prevent IDOR enumeration of other users' predictions.
+  // The token was issued by separate-stems.js as HMAC(predictionId:userId).
+  if (!token) {
+    return res.status(403).json({ error: 'Ownership token required' });
+  }
+  const hmacSecret = process.env.SUPABASE_SERVICE_ROLE_KEY || 'fallback-secret';
+  const expectedToken = createHmac('sha256', hmacSecret)
+    .update(`${id}:${user.id}`)
+    .digest('hex');
+  if (token !== expectedToken) {
+    return res.status(403).json({ error: 'Invalid ownership token' });
   }
 
   try {

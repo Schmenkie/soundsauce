@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 const PAGE_SIZE = 12;
 const DEBOUNCE_MS = 300;
 
-const COLUMNS = 'id, title, description, tags, instrument, post_type, vital_preset_url, is_featured, results, created_at, like_count, comment_count, download_count, profiles:user_id(username, display_name, avatar_url)';
+const COLUMNS = 'id, title, description, tags, instrument, post_type, vital_preset_url, audio_url, is_featured, results, created_at, like_count, comment_count, download_count, profiles:user_id(username, display_name, avatar_url)';
 
 /**
  * Hook for fetching, searching, and filtering public Sound Sauces.
@@ -25,20 +25,32 @@ export function useRecipes() {
   const offsetRef = useRef(0);
   const abortRef = useRef(0);
   const debounceTimerRef = useRef(null);
+  const loadingRef = useRef(false);
+
+  // Keep loadingRef in sync so fetchMore reads current value without stale closure
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
+
+  // Ref that always holds the latest search query so the debounced setTimeout
+  // closure reads the committed value rather than the stale closure value.
+  const searchQueryRef = useRef('');
 
   /**
    * Build a Supabase query with current search, tag, and sort filters applied.
    * @returns {object} Supabase query builder
    */
   const buildQuery = useCallback(() => {
+    // Read from the ref so that a call made inside a setTimeout always uses the
+    // latest query text, even if the React state update hasn't flushed yet.
+    const currentQuery = searchQueryRef.current;
+
     let query = supabase
       .from('analyses')
       .select(COLUMNS)
       .eq('is_public', true);
 
     // Full-text search
-    if (searchQuery.trim()) {
-      query = query.textSearch('search_vector', searchQuery.trim(), { type: 'websearch' });
+    if (currentQuery.trim()) {
+      query = query.textSearch('search_vector', currentQuery.trim(), { type: 'websearch' });
     }
 
     // Tag filter (must have ALL selected tags)
@@ -54,7 +66,7 @@ export function useRecipes() {
     }
 
     return query;
-  }, [searchQuery, selectedTags, sortBy]);
+  }, [selectedTags, sortBy]); // searchQueryRef is a stable ref — no need to list it
 
   /**
    * Fetch the first page of recipes, resetting all pagination state.
@@ -93,7 +105,7 @@ export function useRecipes() {
    * @returns {Promise<void>}
    */
   const fetchMore = useCallback(async () => {
-    if (loading) return;
+    if (loadingRef.current) return;
 
     const callId = ++abortRef.current;
     setLoading(true);
@@ -128,13 +140,17 @@ export function useRecipes() {
       }
     }
     setLoading(false);
-  }, [buildQuery, sortBy, loading]);
+  }, [buildQuery, sortBy]);
 
   /**
    * Set search query text. Actual fetch is triggered by useEffect after debounce.
    * @param {string} query - Search text for full-text search
    */
   const search = useCallback((query) => {
+    // Update the ref synchronously so the debounced fetchRecipes() call
+    // always builds its query with the latest text, regardless of whether
+    // the React state update has flushed yet.
+    searchQueryRef.current = query;
     setSearchQuery(query);
 
     // Debounce the actual fetch
@@ -143,7 +159,7 @@ export function useRecipes() {
     }
     debounceTimerRef.current = setTimeout(() => {
       fetchRecipes();
-    }, 300);
+    }, DEBOUNCE_MS);
   }, [fetchRecipes]);
 
   // Cleanup debounce timer on unmount

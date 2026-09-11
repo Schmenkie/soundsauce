@@ -6,7 +6,7 @@
  */
 
 import vitalInitTemplate from '../data/vitalInitTemplate.json';
-import { CURATED_PRESETS, TUNING_PARAMS, applyKickLFOEnvelopes } from '../data/vitalPresets';
+import { CURATED_PRESETS, TUNING_PARAMS, CATEGORY_VISUAL_PROFILES, applyKickLFOEnvelopes, applyCategoryModulations } from '../data/vitalPresets';
 
 /**
  * Sanitize a string for use in filenames — keeps spaces, letters, numbers, hyphens, parentheses.
@@ -72,13 +72,42 @@ export function buildVitalPreset(presetId, tuningOverrides = {}, metadata = {}) 
     preset.settings[key] = value;
   }
 
-  // 4. Apply kick LFO envelopes if needed
+  // 3b. Apply category visual profile defaults (env_2 shape, LFO 1 settings)
+  // These make presets visually distinct in Vital's UI. Applied as defaults —
+  // curated preset settings (step 3) take priority, and analysis overrides (step 5)
+  // can further customize.
+  const visualProfile = CATEGORY_VISUAL_PROFILES[curated.category];
+  if (visualProfile) {
+    for (const [key, value] of Object.entries(visualProfile)) {
+      // Only set if the curated preset didn't already define this parameter
+      if (!(key in curated.settings)) {
+        preset.settings[key] = value;
+      }
+    }
+  }
+
+  // 3c. Fix oscillator routing — the init template defaults OSC 2 to Filter 2,
+  // but Filter 2 is OFF by default. Route both OSCs through Filter 1 unless the
+  // curated preset explicitly sets up Filter 2.
+  if (preset.settings.osc_2_on === 1 && !curated.settings.filter_2_on) {
+    preset.settings.osc_2_destination = 0; // Route to Filter 1
+  }
+
+  // 3d. Apply category modulation routing (ENV 2 → filter, LFO 1 → destinations)
+  // Without this, ENV 2 and LFO 1 parameters exist in the preset but have
+  // ZERO audible effect because they're not connected to any destination.
+  applyCategoryModulations(preset, curated.category);
+
+  // 4. Apply kick LFO envelopes if needed (overrides LFO shapes from step 3c)
   if (curated.postProcess === 'kick') {
     applyKickLFOEnvelopes(preset);
   }
 
   // 5. Apply tuning overrides from user sliders
   for (const [paramId, value] of Object.entries(tuningOverrides)) {
+    // Skip internal keys (prefixed with _)
+    if (paramId.startsWith('_')) continue;
+
     const paramDef = TUNING_PARAMS.find(p => p.id === paramId);
     if (!paramDef) continue;
 
@@ -89,6 +118,85 @@ export function buildVitalPreset(presetId, tuningOverrides = {}, metadata = {}) 
     // Handle linked toggles (reverb/chorus: dry_wet > 0 → _on = 1)
     if (paramDef.linkedToggle) {
       preset.settings[paramDef.linkedToggle] = clamped > 0 ? 1.0 : 0.0;
+    }
+  }
+
+  // 5b. Apply raw Vital settings overrides from analysis (oscillator wave frame, etc.)
+  // These bypass TUNING_PARAMS since they're not user-adjustable sliders
+  if (tuningOverrides._rawOverrides) {
+    for (const [key, value] of Object.entries(tuningOverrides._rawOverrides)) {
+      preset.settings[key] = value;
+    }
+  }
+
+  // 5c. Apply modulation routing from analysis (LFO, filter envelope, etc.)
+  // Each entry: { slot, source, destination, amount, bipolar }
+  // Slots 7-9 for analysis routing (1-3 for kick LFO, 4-6 for category modulations)
+  if (tuningOverrides._modulations && Array.isArray(tuningOverrides._modulations)) {
+    if (!preset.settings.modulations) preset.settings.modulations = [];
+    // Ensure modulations array has at least 64 entries
+    while (preset.settings.modulations.length < 64) {
+      preset.settings.modulations.push({ source: '', destination: '' });
+    }
+    for (const route of tuningOverrides._modulations) {
+      const idx = route.slot - 1; // slot 4 → array index 3
+      if (idx >= 0 && idx < 64) {
+        preset.settings.modulations[idx] = {
+          source: route.source,
+          destination: route.destination,
+        };
+        preset.settings[`modulation_${route.slot}_amount`] = route.amount;
+        preset.settings[`modulation_${route.slot}_bipolar`] = route.bipolar ?? 0;
+        preset.settings[`modulation_${route.slot}_bypass`] = 0;
+        preset.settings[`modulation_${route.slot}_power`] = 0;
+        preset.settings[`modulation_${route.slot}_stereo`] = 0;
+      }
+    }
+  }
+
+  // 5d. Inject extracted wavetable into OSC 2 (hybrid approach)
+  // OSC 1 keeps the curated preset waveform (proven foundation).
+  // OSC 2 gets the actual audio's timbral character as a custom wavetable.
+  // Users can blend OSC 1/2 levels to taste, or sweep the wavetable frame.
+  // wavetableData: { keyframes: [{position, wave_data}], fundamentalHz, success }
+  if (tuningOverrides._wavetableData && tuningOverrides._wavetableData.success) {
+    const wtData = tuningOverrides._wavetableData;
+    if (preset.settings.wavetables && preset.settings.wavetables.length >= 2) {
+      // Inject into OSC 2's wavetable slot (index 1)
+      preset.settings.wavetables[1] = {
+        author: 'SoundSauce',
+        full_normalize: true,
+        name: 'Extracted Audio',
+        remove_all_dc: false,
+        groups: [{
+          components: [{
+            interpolation: 1,       // Linear interpolation between frames
+            interpolation_style: 1,  // Smooth
+            keyframes: wtData.keyframes.map(kf => ({
+              position: kf.position,
+              wave_data: kf.wave_data
+            }))
+          }]
+        }]
+      };
+      // Enable OSC 2 with the extracted wavetable
+      preset.settings.osc_2_on = 1.0;
+      preset.settings.osc_2_destination = 0; // Route through Filter 1
+      // Set OSC 2 level slightly below OSC 1 so curated tone leads
+      preset.settings.osc_2_level = 0.6;
+      // Set wave frame to middle so user can sweep through timbral evolution
+      if (wtData.keyframes.length > 1) {
+        preset.settings.osc_2_wave_frame = 64;
+      }
+      // Transpose OSC 2 to match detected fundamental if available
+      if (wtData.fundamentalHz && wtData.fundamentalHz > 20) {
+        // Calculate semitones from C4 (261.63 Hz) — Vital's default tuning
+        const semitonesFromC4 = 12 * Math.log2(wtData.fundamentalHz / 261.63);
+        // Only apply if the fundamental is significantly off from C4 (>1 semitone)
+        if (Math.abs(semitonesFromC4) > 1) {
+          preset.settings.osc_2_transpose = Math.round(semitonesFromC4);
+        }
+      }
     }
   }
 

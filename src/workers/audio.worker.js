@@ -1001,74 +1001,118 @@ function detectWaveformType(channelData, sampleRate, attackTimeMs) {
 
 function calculateSpectralMatch(channelDataA, channelDataB, sampleRate) {
   const fftSize = 4096;
-  const lengthA = Math.min(fftSize, channelDataA.length);
-  const lengthB = Math.min(fftSize, channelDataB.length);
+  const freqResolution = sampleRate / fftSize;
 
-  const windowA = channelDataA.slice(0, lengthA);
-  const windowB = channelDataB.slice(0, lengthB);
+  // Multi-window spectral averaging — captures timbral evolution (filter sweeps, etc.)
+  function getAveragedSpectrum(channelData) {
+    const numWindows = Math.min(6, Math.max(1, Math.floor(channelData.length / fftSize)));
+    const hopSize = numWindows > 1
+      ? Math.floor((channelData.length - fftSize) / (numWindows - 1))
+      : 0;
+    const accumulated = new Float32Array(fftSize / 2);
 
-  const magA = computeMagnitudeSpectrum(windowA, fftSize);
-  const magB = computeMagnitudeSpectrum(windowB, fftSize);
+    for (let w = 0; w < numWindows; w++) {
+      const offset = w * hopSize;
+      const end = Math.min(offset + fftSize, channelData.length);
+      const window = new Float32Array(fftSize);
+      for (let i = 0; i < end - offset; i++) {
+        window[i] = channelData[offset + i];
+      }
+      const mag = computeMagnitudeSpectrum(window, fftSize);
+      for (let i = 0; i < mag.length; i++) {
+        accumulated[i] += mag[i];
+      }
+    }
 
-  // Normalize spectra
-  const maxA = Math.max(...magA);
-  const maxB = Math.max(...magB);
-  const normA = magA.map(m => maxA > 0 ? m / maxA : 0);
-  const normB = magB.map(m => maxB > 0 ? m / maxB : 0);
-
-  // Overall correlation
-  let dotProduct = 0;
-  let normASum = 0;
-  let normBSum = 0;
-  for (let i = 0; i < normA.length; i++) {
-    dotProduct += normA[i] * normB[i];
-    normASum += normA[i] * normA[i];
-    normBSum += normB[i] * normB[i];
+    // Average across windows
+    for (let i = 0; i < accumulated.length; i++) {
+      accumulated[i] /= numWindows;
+    }
+    return accumulated;
   }
-  const overallMatch = Math.round(
-    (dotProduct / (Math.sqrt(normASum) * Math.sqrt(normBSum) + 0.0001)) * 100
-  );
 
-  // Band-by-band comparison
+  const magA = getAveragedSpectrum(channelDataA);
+  const magB = getAveragedSpectrum(channelDataB);
+
+  // Normalize to spectral SHAPE (total energy = 1.0)
+  // This compares tonal character regardless of volume differences
+  let totalA = 0, totalB = 0;
+  for (let i = 0; i < magA.length; i++) {
+    totalA += magA[i];
+    totalB += magB[i];
+  }
+  const normA = new Float32Array(magA.length);
+  const normB = new Float32Array(magB.length);
+  for (let i = 0; i < magA.length; i++) {
+    normA[i] = totalA > 0 ? magA[i] / totalA : 0;
+    normB[i] = totalB > 0 ? magB[i] / totalB : 0;
+  }
+
+  // Overall match: cosine similarity on log-weighted spectrum
+  // Log weighting emphasizes perceptually important lower frequencies
+  let dotProduct = 0, normASum = 0, normBSum = 0;
+  for (let i = 1; i < normA.length; i++) {
+    const freqHz = i * freqResolution;
+    if (freqHz < 20 || freqHz > 16000) continue;
+    // Log weighting: lower frequencies get more weight (matches human perception)
+    const weight = 1.0 / Math.log2(1 + freqHz / 20);
+    const a = normA[i] * weight;
+    const b = normB[i] * weight;
+    dotProduct += a * b;
+    normASum += a * a;
+    normBSum += b * b;
+  }
+  const cosine = dotProduct / (Math.sqrt(normASum) * Math.sqrt(normBSum) + 1e-10);
+  const overallMatch = Math.round(Math.max(0, Math.min(100, cosine * 100)));
+
+  // Band-by-band comparison using spectral shape (normalized energy distribution)
   const bands = {
     subBass: { min: 20, max: 60 },
     bass: { min: 60, max: 250 },
     lowMid: { min: 250, max: 500 },
     mid: { min: 500, max: 2000 },
     highMid: { min: 2000, max: 6000 },
-    high: { min: 6000, max: 20000 }
+    high: { min: 6000, max: 16000 }
   };
 
-  const freqResolution = sampleRate / fftSize;
   const bandDifferences = {};
   const eqSuggestions = [];
 
+  // Compute band energy proportions (how much of total energy is in each band)
+  const bandEnergyA = {};
+  const bandEnergyB = {};
   for (const [band, range] of Object.entries(bands)) {
-    const minBin = Math.floor(range.min / freqResolution);
+    const minBin = Math.max(1, Math.floor(range.min / freqResolution));
     const maxBin = Math.min(Math.floor(range.max / freqResolution), normA.length - 1);
-
     let sumA = 0, sumB = 0;
     for (let i = minBin; i <= maxBin; i++) {
       sumA += normA[i];
       sumB += normB[i];
     }
+    bandEnergyA[band] = sumA;
+    bandEnergyB[band] = sumB;
+  }
 
-    const avgA = sumA / (maxBin - minBin + 1);
-    const avgB = sumB / (maxBin - minBin + 1);
-    const diff = avgA - avgB;
-    const similarity = Math.max(0, Math.round((1 - Math.abs(diff) * 2) * 100));
+  for (const [band, range] of Object.entries(bands)) {
+    const eA = bandEnergyA[band];
+    const eB = bandEnergyB[band];
+    // Compare energy proportions — both are normalized to total=1.0
+    // so we're comparing shapes, not absolute levels
+    const maxE = Math.max(eA, eB, 1e-10);
+    const ratio = Math.min(eA, eB) / maxE; // 1.0 = identical, 0.0 = one has energy and other doesn't
+    const similarity = Math.round(ratio * 100);
 
+    const diff = eA - eB;
     bandDifferences[band] = {
       similarity,
-      targetLevel: avgA.toFixed(4),
-      currentLevel: avgB.toFixed(4),
+      targetLevel: eA.toFixed(4),
+      currentLevel: eB.toFixed(4),
       difference: diff.toFixed(4)
     };
 
-    // Generate EQ suggestions
     if (similarity < 70) {
       const action = diff > 0 ? 'boost' : 'cut';
-      const amount = Math.round(Math.abs(diff) * 100);
+      const amount = Math.round(Math.abs(diff) / maxE * 100);
       eqSuggestions.push({
         band,
         action,
@@ -1078,12 +1122,11 @@ function calculateSpectralMatch(channelDataA, channelDataB, sampleRate) {
     }
   }
 
-  // Generate verdict
   let verdict = '';
-  if (overallMatch >= 85) verdict = 'Excellent match! Very similar spectral content.';
-  else if (overallMatch >= 70) verdict = 'Good match. Minor adjustments needed.';
-  else if (overallMatch >= 50) verdict = 'Moderate match. Consider EQ adjustments.';
-  else verdict = 'Low match. Significant spectral differences.';
+  if (overallMatch >= 80) verdict = 'Excellent match! Very similar tonal character.';
+  else if (overallMatch >= 60) verdict = 'Good match. Similar timbre with minor differences.';
+  else if (overallMatch >= 40) verdict = 'Moderate match. Core character is similar.';
+  else verdict = 'Low match. Different tonal character.';
 
   return {
     overallMatch,
@@ -1779,32 +1822,39 @@ function detectInstruments(channelData, sampleRate) {
 
   // GUITAR - mid-range focus, body resonance, harmonic, transient-rich, HIGH spectral contrast
   // Guitar is distinguished from synth by: spectral flux (strumming transients), inharmonic partials
-  scores.guitar += bands.mid * 3;
-  scores.guitar += bands.lowMid * 2.5;
-  scores.guitar += bands.highMid * 2;
-  scores.guitar += bands.bass * 1.5;
-  scores.guitar += attackTime < 80 ? 2 : attackTime < 150 ? 1 : 0;
+  // CRITICAL: mid/highMid bonuses gated behind spectralFlux to prevent kicks/bass from scoring as guitar
+  if (spectralFlux > 0.06) {
+    scores.guitar += bands.mid * 2;
+    scores.guitar += bands.lowMid * 1.5;
+    scores.guitar += bands.highMid * 1.5;
+  }
+  scores.guitar += bands.bass * 1;
+  scores.guitar += attackTime < 80 ? 1.5 : attackTime < 150 ? 1 : 0;
   scores.guitar += spectralFlux > 0.12 ? 3 : spectralFlux > 0.08 ? 2 : spectralFlux > 0.05 ? 1 : 0;
   scores.guitar += harmonicity > 0.5 ? 1.5 : 0;
   scores.guitar -= envelope.isPercussive ? 2 : 0;
-  scores.guitar -= bands.subBass * 3;
+  scores.guitar -= bands.subBass * 4; // Strong sub-bass penalty (kicks/bass live here, guitars don't)
   scores.guitar -= envelope.sustainLevel > 80 ? 2 : 0;
   scores.guitar += (crestFactor > 3 && crestFactor < 8) ? 1 : 0;
   scores.guitar += (envelope.decayTime > 100 && envelope.decayTime < 2000) ? 1 : 0;
+  scores.guitar -= envelope.decayTime < 80 ? 3 : 0; // Very short decay = kick/percussion, not guitar
   scores.guitar -= spectralFlux < 0.04 ? 3 : spectralFlux < 0.06 ? 1.5 : 0;
   // Guitar strings produce slightly inharmonic partials → high spectral contrast
-  scores.guitar += spectralContrast > 1.5 ? 2 : spectralContrast > 1.0 ? 1 : 0;
-  // Stable pitch (not a drum/kick)
+  // But only reward this if NOT a percussive/transient sound (kicks also have high contrast)
+  if (!envelope.isPercussive && envelope.decayTime > 100) {
+    scores.guitar += spectralContrast > 1.5 ? 2 : spectralContrast > 1.0 ? 1 : 0;
+  }
+  // Stable pitch (not a drum/kick) — pitch sweep is a strong anti-guitar signal
   scores.guitar += pitchEnvelope.isStable ? 1 : 0;
+  scores.guitar -= pitchEnvelope.sweepRatio > 1.5 ? 3 : pitchEnvelope.sweepRatio > 1.2 ? 1.5 : 0;
+  // Low frequencies dominating mid = bass/kick, not guitar
+  scores.guitar -= (lowEnergy > midEnergy * 2) ? 3 : (lowEnergy > midEnergy * 1.3) ? 1.5 : 0;
   // Synth chords have very broad, even harmonic energy — real guitars are more focused
-  // High sustain + broad energy is a synth pad, not a guitar
   scores.guitar -= (broadEnergy > 0.2 && envelope.sustainLevel > 50) ? 3 : 0;
   scores.guitar -= (broadEnergy > 0.3) ? 2 : 0;
   // MFCC: Guitars have higher variance in mfccs[3-4] (inharmonic partials from string vibration)
-  // and moderate mfccs[2] (more spectral complexity than a pure synth tone)
-  // NOTE: mfcc34variance defined above in precomputed values section
   scores.guitar += mfcc34variance > 6 ? 2 : mfcc34variance > 3 ? 1 : 0;
-  scores.guitar -= mfcc34variance < 1.5 ? 1 : 0; // Very clean harmonics = synth, not guitar
+  scores.guitar -= mfcc34variance < 1.5 ? 1 : 0;
 
   // STRINGS - high-mid dominant, harmonic, moderate attack, sustained, NOT bass-heavy
   scores.strings += bands.highMid * 2.5;
@@ -2222,11 +2272,11 @@ function calculateAudioFeatures(channelData, sampleRate, reportProgress) {
   if (reportProgress) reportProgress(100, 'Complete!');
 
   return {
-    rms: rms.toFixed(3),
-    brightness: brightness.toFixed(3),
-    spectralCentroid: spectralCentroidHz.toFixed(1),
-    harmonicity: harmonicity.toFixed(3),
-    attackTime: attackTime.toFixed(3),
+    rms,
+    brightness,
+    spectralCentroid: spectralCentroidHz,
+    harmonicity,
+    attackTime,
     bpm: bpmResult,
     key: keyResult,
     adsr: adsrResult,
@@ -2355,6 +2405,312 @@ function extractMLFeaturesFromAudio(channelData, sampleRate) {
 }
 
 // =============================================================================
+// Wavetable Extraction — extract single-cycle waveforms from audio for Vital
+// =============================================================================
+
+/**
+ * Detect the fundamental frequency of a chunk of audio using autocorrelation.
+ * Returns the period in samples, or 0 if no clear pitch found.
+ */
+function detectFundamentalPeriod(data, sampleRate) {
+  // Search 30 Hz – 2000 Hz
+  const minLag = Math.floor(sampleRate / 2000);
+  const maxLag = Math.min(Math.floor(sampleRate / 30), data.length - 1);
+  if (maxLag <= minLag) return 0;
+
+  // Normalized autocorrelation
+  let bestLag = 0;
+  let bestCorr = -1;
+
+  // Pre-compute energy of the full window for normalization
+  let energy0 = 0;
+  for (let i = 0; i < data.length; i++) energy0 += data[i] * data[i];
+  if (energy0 < 1e-10) return 0;
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let corr = 0;
+    let energyLag = 0;
+    const len = data.length - lag;
+    for (let i = 0; i < len; i++) {
+      corr += data[i] * data[i + lag];
+      energyLag += data[i + lag] * data[i + lag];
+    }
+    // Geometric mean normalization
+    const norm = Math.sqrt(energy0 * energyLag);
+    if (norm > 0) corr /= norm;
+
+    if (corr > bestCorr) {
+      bestCorr = corr;
+      bestLag = lag;
+    }
+  }
+
+  // Require reasonably strong correlation to trust the pitch
+  if (bestCorr < 0.5) return 0;
+
+  // Parabolic interpolation for sub-sample accuracy
+  if (bestLag > minLag && bestLag < maxLag) {
+    const corrPrev = (() => {
+      let c = 0, e = 0;
+      const len = data.length - (bestLag - 1);
+      for (let i = 0; i < len; i++) { c += data[i] * data[i + bestLag - 1]; e += data[i + bestLag - 1] * data[i + bestLag - 1]; }
+      return e > 0 ? c / Math.sqrt(energy0 * e) : 0;
+    })();
+    const corrNext = (() => {
+      let c = 0, e = 0;
+      const len = data.length - (bestLag + 1);
+      for (let i = 0; i < len; i++) { c += data[i] * data[i + bestLag + 1]; e += data[i + bestLag + 1] * data[i + bestLag + 1]; }
+      return e > 0 ? c / Math.sqrt(energy0 * e) : 0;
+    })();
+    const shift = (corrPrev - corrNext) / (2 * (corrPrev - 2 * bestCorr + corrNext));
+    if (Math.abs(shift) < 1) bestLag += shift;
+  }
+
+  return bestLag;
+}
+
+/**
+ * Resample a single-cycle waveform to exactly targetLength samples using linear interpolation.
+ */
+function resampleCycle(cycle, targetLength) {
+  const out = new Float32Array(targetLength);
+  const ratio = cycle.length / targetLength;
+  for (let i = 0; i < targetLength; i++) {
+    const srcPos = i * ratio;
+    const idx = Math.floor(srcPos);
+    const frac = srcPos - idx;
+    const a = cycle[idx] || 0;
+    const b = cycle[Math.min(idx + 1, cycle.length - 1)] || 0;
+    out[i] = a + frac * (b - a);
+  }
+  return out;
+}
+
+/**
+ * Normalize a waveform to [-1, 1] range.
+ */
+function normalizeWaveform(data) {
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) {
+    const abs = Math.abs(data[i]);
+    if (abs > peak) peak = abs;
+  }
+  if (peak < 1e-10) return data;
+  const out = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = data[i] / peak;
+  return out;
+}
+
+/**
+ * Clean a single-cycle waveform via FFT — keep only the strongest harmonics, remove noise.
+ * Keeps the top N harmonics by magnitude.
+ */
+function cleanCycleFFT(cycle, maxHarmonics) {
+  const N = cycle.length; // Should be 2048
+  const real = new Float64Array(N);
+  const imag = new Float64Array(N);
+  for (let i = 0; i < N; i++) real[i] = cycle[i];
+
+  fft(real, imag);
+
+  // Find magnitudes of each bin
+  const mags = new Float64Array(N / 2);
+  for (let i = 1; i < N / 2; i++) {
+    mags[i] = Math.sqrt(real[i] * real[i] + imag[i] * imag[i]);
+  }
+
+  // Find threshold: keep top maxHarmonics bins
+  const sorted = Array.from(mags.slice(1)).sort((a, b) => b - a);
+  const threshold = sorted[Math.min(maxHarmonics - 1, sorted.length - 1)] || 0;
+
+  // Zero out bins below threshold
+  for (let i = 1; i < N / 2; i++) {
+    if (mags[i] < threshold) {
+      real[i] = 0;
+      imag[i] = 0;
+      real[N - i] = 0;
+      imag[N - i] = 0;
+    }
+  }
+  // DC and Nyquist
+  real[0] = 0;
+  imag[0] = 0;
+
+  // Inverse FFT: conjugate → FFT → conjugate → scale
+  for (let i = 0; i < N; i++) imag[i] = -imag[i];
+  fft(real, imag);
+  const out = new Float32Array(N);
+  for (let i = 0; i < N; i++) out[i] = real[i] / N;
+
+  return out;
+}
+
+/**
+ * Convert a Float32Array to a base64-encoded string (matching Vital's wave_data format).
+ */
+function float32ToBase64(float32Array) {
+  const bytes = new Uint8Array(float32Array.buffer, float32Array.byteOffset, float32Array.byteLength);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Extract single-cycle wavetable frames from audio.
+ *
+ * Pipeline:
+ *  1. Skip attack transient (~50ms or ADSR attack time)
+ *  2. Detect fundamental frequency via autocorrelation
+ *  3. Slice numFrames single-cycle waveforms evenly across the sustained portion
+ *  4. Resample each to 2048 samples
+ *  5. Normalize to [-1, 1]
+ *  6. Clean via FFT (keep top 64 harmonics, remove noise)
+ *  7. Base64 encode each frame
+ *
+ * @param {Float32Array} channelData - Raw audio samples
+ * @param {number} sampleRate - Sample rate in Hz
+ * @param {number} numFrames - Number of wavetable frames to extract (max 256 for Vital)
+ * @returns {{ keyframes: Array<{position: number, wave_data: string}>, fundamentalHz: number, success: boolean, error?: string }}
+ */
+function extractWavetable(channelData, sampleRate, numFrames) {
+  const VITAL_FRAME_SIZE = 2048;
+  const MAX_HARMONICS = 64; // Keep top 64 harmonics when cleaning
+
+  // 1. Skip attack transient — use first 50ms for energy detection, start extraction after
+  const skipSamples = Math.min(Math.floor(sampleRate * 0.05), Math.floor(channelData.length * 0.1));
+  const sustainStart = skipSamples;
+
+  // Need enough audio for at least a few cycles
+  const availableSamples = channelData.length - sustainStart;
+  if (availableSamples < 256) {
+    return { keyframes: [], fundamentalHz: 0, success: false, error: 'Audio too short for wavetable extraction' };
+  }
+
+  // 2. Detect fundamental frequency from a chunk in the sustained portion
+  //    Use a larger analysis window for better low-frequency detection
+  const analysisLength = Math.min(availableSamples, Math.floor(sampleRate * 0.1)); // 100ms window
+  const analysisData = channelData.slice(sustainStart, sustainStart + analysisLength);
+  const period = detectFundamentalPeriod(analysisData, sampleRate);
+
+  if (period < 2) {
+    // No clear pitch — try with a larger window
+    const bigAnalysisLength = Math.min(availableSamples, Math.floor(sampleRate * 0.25));
+    const bigAnalysisData = channelData.slice(sustainStart, sustainStart + bigAnalysisLength);
+    const bigPeriod = detectFundamentalPeriod(bigAnalysisData, sampleRate);
+
+    if (bigPeriod < 2) {
+      // Still no pitch — fall back to generating a single frame from spectral content
+      return extractSpectralWavetable(channelData, sampleRate, sustainStart, numFrames);
+    }
+    return extractWithPeriod(channelData, sampleRate, sustainStart, bigPeriod, numFrames, VITAL_FRAME_SIZE, MAX_HARMONICS);
+  }
+
+  return extractWithPeriod(channelData, sampleRate, sustainStart, period, numFrames, VITAL_FRAME_SIZE, MAX_HARMONICS);
+}
+
+/**
+ * Extract wavetable frames given a known fundamental period.
+ */
+function extractWithPeriod(channelData, sampleRate, sustainStart, period, numFrames, frameSize, maxHarmonics) {
+  const fundamentalHz = sampleRate / period;
+  const periodInt = Math.round(period);
+  const availableSamples = channelData.length - sustainStart;
+
+  // 3. Calculate how many full cycles we can extract and where to place them
+  const totalCycles = Math.floor(availableSamples / periodInt);
+  if (totalCycles < 1) {
+    return { keyframes: [], fundamentalHz, success: false, error: 'Not enough audio for even one cycle' };
+  }
+
+  // Limit frames to available cycles
+  const actualFrames = Math.min(numFrames, totalCycles, 256);
+
+  // Space extraction points evenly across available audio
+  const keyframes = [];
+  for (let f = 0; f < actualFrames; f++) {
+    // Position in the audio (0 to 1)
+    const audioPos = actualFrames > 1 ? f / (actualFrames - 1) : 0;
+    const sampleOffset = sustainStart + Math.floor(audioPos * (availableSamples - periodInt));
+
+    // Extract one cycle
+    const cycleStart = Math.max(0, Math.min(sampleOffset, channelData.length - periodInt));
+    const rawCycle = channelData.slice(cycleStart, cycleStart + periodInt);
+
+    // 4. Resample to VITAL_FRAME_SIZE (2048) samples
+    const resampled = resampleCycle(rawCycle, frameSize);
+
+    // 5. Normalize
+    const normalized = normalizeWaveform(resampled);
+
+    // 6. Clean via FFT
+    const cleaned = cleanCycleFFT(normalized, maxHarmonics);
+
+    // Re-normalize after cleaning
+    const final = normalizeWaveform(cleaned);
+
+    // 7. Base64 encode
+    const waveData = float32ToBase64(final);
+
+    // Position in Vital: 0-255 mapped to frame index
+    const vitalPosition = actualFrames > 1 ? Math.round((f / (actualFrames - 1)) * 255) : 0;
+
+    keyframes.push({
+      position: vitalPosition,
+      wave_data: waveData
+    });
+  }
+
+  return {
+    keyframes,
+    fundamentalHz,
+    numFrames: actualFrames,
+    success: true
+  };
+}
+
+/**
+ * Fallback: extract a wavetable from spectral content when no clear pitch is found.
+ * Builds frames from FFT magnitude spectrum, useful for noise/texture/drum sounds.
+ */
+function extractSpectralWavetable(channelData, sampleRate, sustainStart, numFrames) {
+  const VITAL_FRAME_SIZE = 2048;
+  const availableSamples = channelData.length - sustainStart;
+  const actualFrames = Math.min(numFrames, 256);
+
+  const keyframes = [];
+  for (let f = 0; f < actualFrames; f++) {
+    const audioPos = actualFrames > 1 ? f / (actualFrames - 1) : 0;
+    const sampleOffset = sustainStart + Math.floor(audioPos * Math.max(0, availableSamples - VITAL_FRAME_SIZE));
+    const chunkStart = Math.max(0, Math.min(sampleOffset, channelData.length - VITAL_FRAME_SIZE));
+    const chunk = channelData.slice(chunkStart, chunkStart + VITAL_FRAME_SIZE);
+
+    // Use the raw chunk, windowed and normalized
+    // Apply Hann window to reduce edge artifacts
+    const windowed = new Float32Array(VITAL_FRAME_SIZE);
+    for (let i = 0; i < VITAL_FRAME_SIZE; i++) {
+      const hannValue = 0.5 * (1 - Math.cos(2 * Math.PI * i / (VITAL_FRAME_SIZE - 1)));
+      windowed[i] = (chunk[i] || 0) * hannValue;
+    }
+
+    const normalized = normalizeWaveform(windowed);
+    const waveData = float32ToBase64(normalized);
+    const vitalPosition = actualFrames > 1 ? Math.round((f / (actualFrames - 1)) * 255) : 0;
+
+    keyframes.push({ position: vitalPosition, wave_data: waveData });
+  }
+
+  return {
+    keyframes,
+    fundamentalHz: 0,
+    numFrames: actualFrames,
+    success: true,
+    spectralFallback: true
+  };
+}
+
+// =============================================================================
 // Message Handler
 // =============================================================================
 
@@ -2437,6 +2793,15 @@ self.onmessage = function(e) {
           fallback: detectInstruments(new Float32Array(payload.channelData), payload.sampleRate)
         };
         break;
+
+      case 'EXTRACT_WAVETABLE': {
+        result = extractWavetable(
+          new Float32Array(payload.channelData),
+          payload.sampleRate,
+          payload.numFrames || 256
+        );
+        break;
+      }
 
       case 'GENERATE_WAVEFORM_DATA': {
         const channelData = new Float32Array(payload.channelData);

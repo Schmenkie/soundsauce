@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Clock, Tag, Music, Zap, BarChart2, ArrowLeft, Download, Sliders, ExternalLink, CheckCircle, ChevronDown, Shield, EyeOff, Award, Heart, MessageSquare, Hash } from 'lucide-react';
+import { User, Clock, Tag, Music, Zap, BarChart2, ArrowLeft, Download, Sliders, ExternalLink, CheckCircle, ChevronDown, Shield, EyeOff, Award, Heart, MessageSquare, Hash, Play, Pause, Volume2 } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { FollowButton } from './FollowButton';
 import { supabase } from '../../lib/supabase';
@@ -25,6 +25,39 @@ export function RecipeDetail({ recipe, theme, t, liked, onToggleLike, isFollowin
   const [localDownloadCount, setLocalDownloadCount] = useState(recipe.download_count || 0);
 
   const alreadyDownloaded = hasCommunityDownload?.(recipe.id);
+
+  // Audio player state
+  const audioRef = useRef(null);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const progressIntervalRef = useRef(null);
+
+  const toggleAudioPlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audioPlaying) {
+      audio.pause();
+      setAudioPlaying(false);
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    } else {
+      audio.play().catch(() => {});
+      setAudioPlaying(true);
+      progressIntervalRef.current = setInterval(() => {
+        setAudioProgress(audio.currentTime);
+      }, 100);
+    }
+  }, [audioPlaying]);
+
+  const handleAudioSeek = useCallback((e) => {
+    const audio = audioRef.current;
+    if (!audio || !audioDuration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    audio.currentTime = pct * audioDuration;
+    setAudioProgress(audio.currentTime);
+  }, [audioDuration]);
 
   // Fallback: find a curated preset for seed recipes that lack a vital_preset_url
   const fallbackPreset = useMemo(() => {
@@ -120,7 +153,7 @@ export function RecipeDetail({ recipe, theme, t, liked, onToggleLike, isFollowin
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
             {profile?.avatar_url ? (
-              <img src={profile.avatar_url} alt="" className="w-8 h-8 object-cover rounded-full" />
+              <img src={profile.avatar_url} alt={`${profile.display_name || profile.username || 'User'} avatar`} className="w-8 h-8 object-cover rounded-full" />
             ) : (
               <div className={`w-8 h-8 flex items-center justify-center font-bold rounded-full ${
                 theme === 'dark' ? 'bg-zinc-800 text-white' : 'bg-amber-50 text-ember-700'
@@ -279,6 +312,62 @@ export function RecipeDetail({ recipe, theme, t, liked, onToggleLike, isFollowin
           </div>
         )}
       </div>
+
+      {/* Audio preview player */}
+      {recipe.audio_url && (
+        <div className={`p-4 ${cardClass}`}>
+          <audio
+            ref={audioRef}
+            src={recipe.audio_url}
+            preload="metadata"
+            onLoadedMetadata={(e) => setAudioDuration(e.target.duration)}
+            onEnded={() => {
+              setAudioPlaying(false);
+              setAudioProgress(0);
+              if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+            }}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={toggleAudioPlayback}
+              className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-colors ${
+                audioPlaying
+                  ? theme === 'dark' ? 'bg-ember-500/20 text-ember-400' : 'bg-amber-100 text-ember-700'
+                  : theme === 'dark' ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+              aria-label={audioPlaying ? 'Pause audio' : 'Play audio'}
+            >
+              {audioPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+            </button>
+
+            {/* Progress bar */}
+            <div
+              className={`flex-1 h-2 rounded-full cursor-pointer ${
+                theme === 'dark' ? 'bg-zinc-800' : 'bg-stone-200'
+              }`}
+              onClick={handleAudioSeek}
+              role="progressbar"
+              aria-valuenow={audioProgress}
+              aria-valuemin={0}
+              aria-valuemax={audioDuration}
+            >
+              <div
+                className={`h-full rounded-full transition-[width] duration-100 ${
+                  theme === 'dark' ? 'bg-ember-500' : 'bg-ember-600'
+                }`}
+                style={{ width: audioDuration ? `${(audioProgress / audioDuration) * 100}%` : '0%' }}
+              />
+            </div>
+
+            {/* Time */}
+            <span className={`text-xs font-mono tabular-nums flex-shrink-0 ${t.textDimmed}`}>
+              {formatTime(audioProgress)} / {formatTime(audioDuration)}
+            </span>
+
+            <Volume2 className={`w-4 h-4 flex-shrink-0 ${t.textDimmed}`} />
+          </div>
+        </div>
+      )}
 
       {/* Vital explainer for regular recipes with preset */}
       {!isPresetPost && (recipe.vital_preset_url || fallbackPreset) && (
@@ -487,6 +576,13 @@ function CollapsibleSection({ title, icon: Icon, theme, t, cardClass, children, 
       )}
     </div>
   );
+}
+
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 function FeatureItem({ label, value, theme, t }) {

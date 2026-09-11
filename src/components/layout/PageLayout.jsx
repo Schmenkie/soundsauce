@@ -18,9 +18,9 @@ export function PageLayout({ children, theme, onToggleTheme }) {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-zinc-950' : 'bg-stone-50'}`}>
-      {/* Main content area — full width, padded for dock clearance */}
+      {/* Main content area — full width, padded for dock clearance at top */}
       <main className="min-h-screen">
-        <div className="p-4 md:p-8 pb-28">
+        <div className="p-4 md:p-8 md:pl-20">
           {children}
         </div>
       </main>

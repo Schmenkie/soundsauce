@@ -77,7 +77,7 @@ export function RecreationResult({ result, theme }) {
           <div className="space-y-1">
             {eqSuggestions.map((tip, i) => (
               <p key={i} className={`text-xs ${theme === 'dark' ? 'text-zinc-400' : 'text-stone-500'}`}>
-                {tip}
+                {tip.action === 'boost' ? 'Boost' : 'Cut'} {tip.freqRange} (~{tip.amount}%)
               </p>
             ))}
           </div>

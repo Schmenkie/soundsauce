@@ -513,7 +513,7 @@ export function Profile({ theme, t }) {
                   theme === 'dark' ? 'bg-zinc-800' : 'bg-amber-50'
                 }`}>
                   {profile?.avatar_url ? (
-                    <img src={profile.avatar_url} alt="" className="w-20 h-20 object-cover rounded-full" />
+                    <img src={profile.avatar_url} alt={`${profile.username || profile.display_name || 'Your'} avatar`} className="w-20 h-20 object-cover rounded-full" />
                   ) : (
                     <div className="w-20 h-20 flex items-center justify-center">
                       <User className={`w-10 h-10 ${theme === 'dark' ? 'text-zinc-400' : 'text-ember-600'}`} />

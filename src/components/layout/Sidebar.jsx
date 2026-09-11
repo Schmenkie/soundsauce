@@ -123,7 +123,7 @@ export function Sidebar({ theme }) {
       {/* Mobile hamburger button */}
       <button
         onClick={() => setMobileOpen(true)}
-        className={`fixed top-4 left-4 z-40 p-2 rounded-md md:hidden ${
+        className={`fixed top-4 left-4 z-40 p-3 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md md:hidden ${
           theme === 'dark' ? 'bg-zinc-900 text-zinc-50' : 'bg-white text-stone-900 shadow-md'
         }`}
         aria-label="Open menu"

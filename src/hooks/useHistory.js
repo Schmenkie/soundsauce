@@ -183,22 +183,74 @@ export function useHistory() {
    */
   const addToHistory = useCallback(async (entry) => {
     if (user) {
-      // Cloud save
+      // Cloud save — check for existing analysis with same audio file to avoid duplicates
       const row = toSupabaseRow(entry, user.id);
-      const { data, error } = await supabase
-        .from('analyses')
-        .insert(row)
-        .select()
-        .single();
+      let existingId = null;
 
-      if (!error && data) {
-        setHistory(prev => [fromSupabaseRow(data), ...prev].slice(0, MAX_HISTORY_ITEMS));
+      // Match on audio_filename (most reliable — audio_url may differ across uploads)
+      if (row.audio_filename) {
+        const { data: existing } = await supabase
+          .from('analyses')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('audio_filename', row.audio_filename)
+          .limit(1)
+          .single();
+        if (existing) existingId = existing.id;
+      }
+
+      if (existingId) {
+        // Update existing row instead of creating a duplicate
+        const { data, error } = await supabase
+          .from('analyses')
+          .update({
+            title: row.title,
+            instrument: row.instrument,
+            stem_type: row.stem_type,
+            results: row.results,
+            audio_url: row.audio_url,
+            stem_urls: row.stem_urls,
+          })
+          .eq('id', existingId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          // Replace existing entry in local state and move to top
+          setHistory(prev => {
+            const filtered = prev.filter(item => item.id !== existingId);
+            return [fromSupabaseRow(data), ...filtered].slice(0, MAX_HISTORY_ITEMS);
+          });
+        } else {
+          console.error('Failed to update analysis:', error);
+        }
       } else {
-        console.error('Failed to save analysis:', error);
+        // No existing match — insert new row
+        const { data, error } = await supabase
+          .from('analyses')
+          .insert(row)
+          .select()
+          .single();
+
+        if (!error && data) {
+          setHistory(prev => [fromSupabaseRow(data), ...prev].slice(0, MAX_HISTORY_ITEMS));
+        } else {
+          console.error('Failed to save analysis:', error);
+        }
       }
     } else {
-      // Local save
-      setHistory(prev => [entry, ...prev].slice(0, MAX_HISTORY_ITEMS));
+      // Local save — deduplicate by audioFilename
+      setHistory(prev => {
+        const matchIdx = entry.audioFilename
+          ? prev.findIndex(item => item.audioFilename === entry.audioFilename)
+          : -1;
+        if (matchIdx >= 0) {
+          // Replace existing entry and move to top
+          const filtered = prev.filter((_, i) => i !== matchIdx);
+          return [entry, ...filtered].slice(0, MAX_HISTORY_ITEMS);
+        }
+        return [entry, ...prev].slice(0, MAX_HISTORY_ITEMS);
+      });
     }
   }, [user]);
 

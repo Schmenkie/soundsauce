@@ -172,9 +172,7 @@ export function Settings({ theme, t, onThemeToggle }) {
                 className={`flex-1 flex items-center justify-center gap-2 py-3 font-medium transition-all rounded-md ${
                   theme === 'dark'
                     ? 'bg-white text-black'
-                    : theme === 'dark'
-                      ? 'bg-zinc-800 text-zinc-400 hover:text-white'
-                      : 'border border-stone-200 text-stone-500 hover:border-ember-600'
+                    : 'border border-stone-200 text-stone-500 hover:border-ember-600'
                 }`}
               >
                 <Moon className="w-4 h-4" />
@@ -185,9 +183,7 @@ export function Settings({ theme, t, onThemeToggle }) {
                 className={`flex-1 flex items-center justify-center gap-2 py-3 font-medium transition-all rounded-md ${
                   theme === 'light'
                     ? 'bg-ember-600 text-white'
-                    : theme === 'dark'
-                      ? 'bg-zinc-800 text-zinc-400 hover:text-white'
-                      : 'border border-stone-200 text-stone-500 hover:border-ember-600'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-white'
                 }`}
               >
                 <Sun className="w-4 h-4" />

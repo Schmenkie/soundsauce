@@ -158,6 +158,18 @@ export function useAudioWorker() {
     };
   }, [postMessage]);
 
+  /**
+   * Extract wavetable frames from audio for Vital preset injection.
+   * @param {Float32Array} channelData - Audio samples
+   * @param {number} sampleRate - Sample rate in Hz
+   * @param {number} [numFrames=256] - Number of wavetable frames to extract
+   * @returns {Promise<Object>} - { keyframes, fundamentalHz, numFrames, success, error? }
+   */
+  const extractWavetable = useCallback(async (channelData, sampleRate, numFrames = 256) => {
+    const buffer = channelData.buffer.slice(0);
+    return postMessage('EXTRACT_WAVETABLE', { channelData: buffer, sampleRate, numFrames });
+  }, [postMessage]);
+
   return {
     isProcessing,
     progress,
@@ -165,6 +177,7 @@ export function useAudioWorker() {
     detectInstruments,
     calculateSpectralMatch,
     detectHarmonics,
-    generateWaveformData
+    generateWaveformData,
+    extractWavetable
   };
 }

@@ -19,6 +19,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
  * @param {boolean} hasOverride - Whether value differs from preset default
  * @param {boolean} isDark - Dark mode flag
  * @param {function} onChange - Callback with new value
+ * @param {{ direction: 'higher'|'lower'|'adjust', label: string }} [suggestion] - Inline tuning suggestion from compare results
  */
 export function SynthKnob({
   value,
@@ -32,6 +33,7 @@ export function SynthKnob({
   hasOverride,
   isDark,
   onChange,
+  suggestion,
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, startValue: 0 });
@@ -287,6 +289,21 @@ export function SynthKnob({
       >
         {formattedValue}
       </span>
+
+      {/* Inline suggestion from compare results */}
+      {suggestion && (
+        <span
+          className={`text-[9px] font-medium leading-tight text-center mt-0.5 px-1 py-0.5 rounded ${
+            suggestion.direction === 'higher'
+              ? isDark ? 'text-amber-400 bg-amber-500/10' : 'text-amber-700 bg-amber-50'
+              : suggestion.direction === 'lower'
+                ? isDark ? 'text-blue-400 bg-blue-500/10' : 'text-blue-700 bg-blue-50'
+                : isDark ? 'text-zinc-400 bg-zinc-800' : 'text-stone-500 bg-stone-100'
+          }`}
+        >
+          {suggestion.direction === 'higher' ? '↑ higher' : suggestion.direction === 'lower' ? '↓ lower' : '~ adjust'}
+        </span>
+      )}
     </div>
   );
 }

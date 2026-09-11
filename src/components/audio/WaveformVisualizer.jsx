@@ -56,6 +56,9 @@ export function WaveformVisualizer({
   const hasInteractedRef = useRef(false);
   const [hasInteracted, setHasInteracted] = useState(false);
 
+  // Cursor state for loop handle hover
+  const [cursorStyle, setCursorStyle] = useState('crosshair');
+
   // Pinch-to-zoom refs
   const pinchStartDistRef = useRef(null);
   const pinchStartZoomRef = useRef(null);
@@ -248,10 +251,12 @@ export function WaveformVisualizer({
     const visStart = getVisibleStart();
     const visDur = getVisibleDuration();
 
-    // Draw loop region
-    if (loopStart != null && loopEnd != null) {
-      const lx0 = timeToX(loopStart, width);
-      const lx1 = timeToX(loopEnd, width);
+    // Draw loop region (use drag preview if actively dragging a handle)
+    const drawLoopStart = dragLoopRef.current?.start ?? loopStart;
+    const drawLoopEnd = dragLoopRef.current?.end ?? loopEnd;
+    if (drawLoopStart != null && drawLoopEnd != null) {
+      const lx0 = timeToX(drawLoopStart, width);
+      const lx1 = timeToX(drawLoopEnd, width);
 
       if (lx1 > 0 && lx0 < width) {
         const clampL = Math.max(0, lx0);
@@ -273,6 +278,46 @@ export function WaveformVisualizer({
           ctx.moveTo(lx1 + 0.5, 0);
           ctx.lineTo(lx1 + 0.5, height);
           ctx.stroke();
+        }
+
+        // Draw drag handle indicators (triangles at top/bottom of boundaries)
+        const handleColor = colors.loopBorder;
+        const hs = 10; // handle size in px
+        // Left handle (start boundary)
+        if (lx0 >= 0 && lx0 <= width) {
+          ctx.fillStyle = handleColor;
+          // Top triangle pointing right
+          ctx.beginPath();
+          ctx.moveTo(lx0, 0);
+          ctx.lineTo(lx0 + hs, 0);
+          ctx.lineTo(lx0, hs);
+          ctx.closePath();
+          ctx.fill();
+          // Bottom triangle pointing right
+          ctx.beginPath();
+          ctx.moveTo(lx0, height);
+          ctx.lineTo(lx0 + hs, height);
+          ctx.lineTo(lx0, height - hs);
+          ctx.closePath();
+          ctx.fill();
+        }
+        // Right handle (end boundary)
+        if (lx1 >= 0 && lx1 <= width) {
+          ctx.fillStyle = handleColor;
+          // Top triangle pointing left
+          ctx.beginPath();
+          ctx.moveTo(lx1, 0);
+          ctx.lineTo(lx1 - hs, 0);
+          ctx.lineTo(lx1, hs);
+          ctx.closePath();
+          ctx.fill();
+          // Bottom triangle pointing left
+          ctx.beginPath();
+          ctx.moveTo(lx1, height);
+          ctx.lineTo(lx1 - hs, height);
+          ctx.lineTo(lx1, height - hs);
+          ctx.closePath();
+          ctx.fill();
         }
       }
     }
@@ -605,12 +650,27 @@ export function WaveformVisualizer({
     // Shift+drag = pan
     if (e.shiftKey) {
       setDragMode('pan');
+    } else if (loopStart != null && loopEnd != null) {
+      // Check if clicking near a loop handle (within 8px of boundary)
+      const startX = timeToX(loopStart, rect.width);
+      const endX = timeToX(loopEnd, rect.width);
+      const HANDLE_THRESHOLD = 12;
+
+      if (Math.abs(localX - startX) < HANDLE_THRESHOLD) {
+        setDragMode('handle-start');
+        dragLoopRef.current = { start: loopStart, end: loopEnd };
+      } else if (Math.abs(localX - endX) < HANDLE_THRESHOLD) {
+        setDragMode('handle-end');
+        dragLoopRef.current = { start: loopStart, end: loopEnd };
+      } else {
+        setDragMode('pending');
+      }
     } else {
       setDragMode('pending'); // Decide on move whether it's seek or loop-select
     }
 
     e.preventDefault();
-  }, [duration, zoom, getEventPos, xToTime, scrollOffset]);
+  }, [duration, zoom, getEventPos, xToTime, scrollOffset, loopStart, loopEnd, timeToX]);
 
   const handlePointerMove = useCallback((e) => {
     if (!dragStartRef.current || !containerRef.current || !duration) return;
@@ -665,13 +725,29 @@ export function WaveformVisualizer({
         drawOverlay(playbackTimeRef?.current ?? playbackTime ?? 0);
       }
     }
+
+    // Handle drag: resize loop boundary
+    if (dragMode === 'handle-start' || dragMode === 'handle-end') {
+      const rect = containerRef.current.getBoundingClientRect();
+      const localX = Math.max(0, Math.min(pos.x - rect.left, rect.width));
+      const currentTime = Math.max(0, Math.min(xToTime(localX, rect.width), duration));
+
+      if (dragMode === 'handle-start') {
+        const newStart = Math.min(currentTime, (dragLoopRef.current?.end ?? duration) - 0.1);
+        dragLoopRef.current = { start: Math.max(0, newStart), end: dragLoopRef.current?.end ?? duration };
+      } else {
+        const newEnd = Math.max(currentTime, (dragLoopRef.current?.start ?? 0) + 0.1);
+        dragLoopRef.current = { start: dragLoopRef.current?.start ?? 0, end: Math.min(newEnd, duration) };
+      }
+      drawOverlay(playbackTimeRef?.current ?? playbackTime ?? 0);
+    }
   }, [dragMode, duration, getEventPos, getVisibleDuration, xToTime, zoomCenteredAt, drawOverlay, playbackTime, playbackTimeRef]);
 
   const handlePointerUp = useCallback(() => {
     if (!dragStartRef.current) return;
 
-    if (dragMode === 'loop-select' && dragLoopRef.current) {
-      // Complete loop selection
+    if ((dragMode === 'loop-select' || dragMode === 'handle-start' || dragMode === 'handle-end') && dragLoopRef.current) {
+      // Complete loop selection or handle resize
       const { start, end } = dragLoopRef.current;
       if (end - start >= 0.1) {
         onLoopRegionChange?.({ start, end });
@@ -686,6 +762,24 @@ export function WaveformVisualizer({
     setDragMode(null);
     autoScrollEnabledRef.current = true;
   }, [dragMode, duration, onSeek, onLoopRegionChange]);
+
+  // === Hover cursor for loop handles ===
+  const handleHoverCursor = useCallback((e) => {
+    if (dragMode || !containerRef.current || loopStart == null || loopEnd == null) {
+      return;
+    }
+    const rect = containerRef.current.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const startX = timeToX(loopStart, rect.width);
+    const endX = timeToX(loopEnd, rect.width);
+    const HANDLE_THRESHOLD = 12;
+
+    if (Math.abs(localX - startX) < HANDLE_THRESHOLD || Math.abs(localX - endX) < HANDLE_THRESHOLD) {
+      setCursorStyle('ew-resize');
+    } else {
+      setCursorStyle('crosshair');
+    }
+  }, [dragMode, loopStart, loopEnd, timeToX]);
 
   // === Scroll wheel: pan (default) or zoom (Ctrl/Cmd) ===
   const handleWheel = useCallback((e) => {
@@ -894,17 +988,17 @@ export function WaveformVisualizer({
         </div>
       ) : (
         <div className={`text-xs ${t.textDimmed} mb-2`}>
-          Click to seek | Drag to set loop region | Scroll to pan | Ctrl+scroll to zoom{zoom > 1 && ' | Shift+drag to pan'}
+          Click to seek | Drag to select region{loopStart != null ? ' | Drag edges to resize' : ''} | Scroll to pan | Ctrl+scroll to zoom{zoom > 1 && ' | Shift+drag to pan'}
         </div>
       )}
 
       {/* Main waveform canvas area */}
       <div
         ref={containerRef}
-        className="relative cursor-crosshair select-none"
-        style={{ height: '120px', touchAction: 'none' }}
+        className="relative select-none"
+        style={{ height: '120px', touchAction: 'none', cursor: cursorStyle }}
         onMouseDown={handlePointerDown}
-        onMouseMove={handlePointerMove}
+        onMouseMove={(e) => { handlePointerMove(e); handleHoverCursor(e); }}
         onMouseUp={handlePointerUp}
         onMouseLeave={handlePointerUp}
         onTouchStart={handlePointerDown}

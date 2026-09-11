@@ -21,7 +21,14 @@ export function useMessages(conversationId) {
   const [hasOlder, setHasOlder] = useState(false);
   const fetchIdRef = useRef(0);
   const messagesRef = useRef(messages);
+  const mountedRef = useRef(true);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Track mount state so async callbacks don't set state after unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Fetch initial messages (newest PAGE_SIZE, reversed for chronological display)
   useEffect(() => {
@@ -130,8 +137,8 @@ export function useMessages(conversationId) {
       )
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          // Realtime failed — fall back to polling
-          if (!usingFallback) {
+          // Realtime failed — fall back to polling, but only if still mounted
+          if (!usingFallback && mountedRef.current) {
             usingFallback = true;
             startPolling();
           }
@@ -154,7 +161,7 @@ export function useMessages(conversationId) {
           .gt('created_at', latestTime)
           .order('created_at', { ascending: true });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data && data.length > 0 && mountedRef.current) {
           setMessages(prev => {
             const existingIds = new Set(prev.map(m => m.id));
             const newMessages = data.filter(m => !existingIds.has(m.id));
