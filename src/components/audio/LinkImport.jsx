@@ -164,7 +164,9 @@ export function LinkImport({ helper, onImported, onBatch, batch, onCancelBatch, 
             <p className={`font-mono text-[11px] mt-0.5 ${t.textDimmed}`}>
               {health && !health.ok
                 ? 'brew install yt-dlp ffmpeg — then it just works'
-                : 'Run the helper on this Mac and YouTube / SoundCloud links turn into FLACs here.'}
+                : window.location.protocol === 'https:'
+                  ? 'Helper not reachable. If the menubar dot is green, Chrome is blocking local network access — see "How".'
+                  : 'Run the helper on this Mac and YouTube / SoundCloud links turn into FLACs here.'}
             </p>
           </div>
           {!checking && !(health && !health.ok) && (
@@ -191,6 +193,12 @@ npm run helper            # keep this running while you work
 npm run helper:install`}
             </pre>
             <p>Finished tracks are also saved to <span className="font-mono">~/Music/Remix Lab/Sources</span> — add that folder to Live's Places.</p>
+            {window.location.protocol === 'https:' && (
+              <p className={`p-3 rounded-md border ${isDark ? 'border-ember-500/40 bg-[#14171C]' : 'border-ember-600/40 bg-white'}`}>
+                <span className={`font-display font-bold uppercase tracking-wide text-[11px] ${t.text}`}>Helper running but still "off"?</span><br />
+                This site is on HTTPS and the helper is on <span className="font-mono">localhost</span>, so Chrome asks permission once (“access devices on your local network”). If it was dismissed: click the icon left of the address → <span className="font-mono">Site settings</span> → <span className="font-mono">Local network access</span> → Allow, then reload. Safari doesn't allow this at all — use Chrome, or run the Lab locally with <span className="font-mono">npm run dev:full</span>.
+              </p>
+            )}
           </div>
         )}
       </div>
