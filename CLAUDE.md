@@ -47,6 +47,7 @@ audio-analyzer-pro/
 │   ├── _posthog.js              # Server-side PostHog client
 │   ├── auth.js                  # POST {password} → {token, expiresAt}; GET verifies a token
 │   ├── upload-audio.js          # @vercel/blob client-upload token endpoint (wav/mp3/m4a/flac, 100 MB)
+│   ├── vault.js                 # Vault index: GET (tracks + Blob usage) / PUT (replace) / DELETE (blobs of a removed track)
 │   ├── separate-stems.js        # Start Demucs prediction: mode vocals|stems4|stems6, quality best|fast, FLAC
 │   ├── check-stems.js           # Poll prediction; returns whatever stem keys the mode produced
 │   └── instrument.js            # Gemini zero-shot instrument labels; deletes its Blob upload after reading it
@@ -59,6 +60,7 @@ audio-analyzer-pro/
 ├── src/
 │   ├── lib/
 │   │   ├── helper.js            # Client for the local helper (health, resolve, jobs, file URLs, clipboard URL sniffing)
+│   │   ├── vault.js             # Vault client: fetch/save/deleteBlobs, vaultIdFor(), Camelot + tempo compatibility helpers
 │   │   ├── labAuth.js           # getLabToken, labAuthHeaders, labSignIn, labVerify, labSignOut (localStorage)
 │   │   ├── posthog.js           # PostHog init + tracking helpers (many are legacy no-ops now)
 │   │   ├── sentry.js            # Optional error monitoring
@@ -78,14 +80,18 @@ audio-analyzer-pro/
 │   │   ├── useAudioProcessor.js # Web Audio playback + analysis orchestration (+ detectTempoAndKey proxy)
 │   │   ├── useAudioWorker.js    # Worker RPC (analyzeAudio, detectInstruments, detectTempoAndKey, spectral match, …)
 │   │   ├── useStemSeparation.js # Separation workflow, keep-to-Blob, stamped downloads, Remix Pack zip
+│   │   ├── useVault.js          # Vault state: cached load, serialised whole-index saves, upsertTrack/removeTrack
 │   │   ├── useHelper.js         # Helper availability (15s poll + focus), resolve(query), grab(url) with job progress
 │   │   ├── useHistory.js        # localStorage recent analyses
 │   │   ├── useTheme.js, usePageTitle.js, useFocusTrap.js
 │   ├── pages/
+│   │   ├── Vault.jsx            # /vault — track grid, search, Camelot chips, "mixes with" mode, pack/stem downloads, delete
 │   │   ├── Analyze.jsx          # The Lab (route "/") — upload, waveform, stems, analysis step flow
 │   │   ├── Settings.jsx         # Theme, DAW, artist name, lab lock, storage note
 │   │   └── NotFound.jsx
 │   ├── utils/
+│   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl (shared by Lab + Vault)
+│   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes
 │   │   ├── constants.js, recommendations.js, demoSoundGenerator.js, validateEnv.js
 │   ├── data/                    # vitalPresets.js, vitalInitTemplate.json, dawPlugins.js, flStudioPlugins.js
@@ -119,6 +125,17 @@ yt-dlp cannot run on Vercel (Python + ffmpeg, and YouTube blocks datacenter IPs)
 - Metadata: `splitArtistTitle()` prefers yt-dlp's `artist`/`track`, else splits "Artist - Title", else uses the uploader; strips "(Official Video)" noise. Files are also copied to `~/Music/Remix Lab/Sources/<Artist - Title>.flac` for Live's browser.
 - Frontend: `useHelper()` polls `/health`; `LinkImport` shows a setup card when offline, otherwise a paste/search box with clipboard-link suggestion, results list, and a progress bar. `Analyze.handleImported()` loads the FLAC exactly like an upload and sets `audioMetadata` (artist, title, thumbnailUrl, sourceUrl) — the header shows the artwork and stem filenames get the real artist.
 - Keep yt-dlp current (`brew upgrade yt-dlp`) — YouTube breaks old versions every few months; the helper's `/health` reports the version.
+
+### The Vault
+
+One JSON document, `vault/index.json` on Vercel Blob, read/written only through `/api/vault` (lab-gated). Single user → whole-index replace on every save; `useVault` serialises saves through a promise chain and keeps a localStorage cache for instant loads.
+
+- **Track id** = the random suffix of the source upload's Blob URL (`vaultIdFor(audioUrl)`), so re-separating the same upload updates rather than duplicates.
+- **Auto-save**: an effect in `Analyze.jsx` upserts the track whenever `separationStatus === 'ready'`, and again as `keepStatus` changes (so `kept` flags and permanent URLs land). Fields: title, artist, source, sourceUrl, thumbnailUrl (the platform artwork URL from the helper — not the helper's temp file), duration, bpm, key `{ key, mode, camelot, confidence }`, audioUrl, mode, `stems: { [type]: { url, kept, size } }`, notes, tags.
+- **Restore**: `/?track=<id>` — the Lab fetches `audioUrl`, resets state, sets metadata, and calls `restoreStems(urls, audioUrl, mode)`. Replaces the Supabase-era `?id=` restore.
+- **Delete** removes the entry and `del()`s its stem + source blobs, then refreshes the Blob usage summary (shown as a spectrum bar against the 1 GB Hobby cap).
+- **Compatibility mode** ("mixes with"): `compatibleCamelot()` (same, ±1, relative) and `tempoCompatible()` (±8%, or half/double) in `lib/vault.js`.
+- Downloads from the Vault go through `utils/remixPack.js`, which fetches stem URLs and zips client-side (expired Replicate URLs surface as "re-separate the track").
 
 ### Preferences (was "profile")
 
@@ -353,7 +370,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 | 2 | **Strip the site + drop Supabase** | ✅ Done | 160 files deleted; lab password auth; localStorage prefs |
 | 2b | **Link import (local helper)** | ✅ Done | yt-dlp companion; paste a YouTube/SoundCloud link or search by name; FLAC + artist/title/artwork |
 | 2c | **Signal Deck UI** | ✅ Foundation done | Chosen from 3 mock directions. Tokens, fonts, grid, Dock, header, frequency-coloured waveform, spectrum analyzer, stem channel strips with live meters. Remaining: AnalysisStepFlow content cards, Settings polish |
-| 3 | **Acapella Vault** (`/vault`, `/vault/:id`) | Next | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
+| 3 | **Acapella Vault** (`/vault`) | ✅ Done | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
 | 4 | **Remix Calculator** (`/calc`) | Planned | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
 | 5 | **Stem Player + Arrangement Map** | Planned | Synced mute/solo of all stems; stacked stem waveforms with a bar grid from BPM (stem waveform data is already cached per stem in Analyze) |
 | 6 | **Anatomy of a Track** | Planned | Run the analysis pipeline per stem and present it as a study guide (reframes InstrumentSelector / ADSR / feature cards) |
@@ -370,6 +387,8 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Key detection fix** (Sep 2026) — `detectKey` analysed only the first ~1.4 s, mislabelled pitch classes by 9 semitones, and inverted the K-S rotation. Now: 200 windows across the whole track, harmonic pitch-class profile from spectral peaks (f/1..f/4, bass boost), confidence + alternatives. Tell Me What You Want → Bb minor 3A (was E/G#/F#m). `scripts/key-check.mjs` runs the detector on any file. Conventional flat spellings via `displayKeyName()`.
+- [x] **Acapella Vault** (Sep 2026) — `api/vault.js`, `lib/vault.js`, `useVault`, `pages/Vault.jsx`, `utils/remixPack.js`; auto-save on stems ready / keep; `/?track=<id>` restore; Dock item; SaucyHelper tips.
 - [x] **Signal Deck UI — foundation** (Sep 2026)
   - Direction chosen from the `Remix Lab Directions` mock deck (Neon Playground / Riso Studio / Signal Deck) with the spectrum widened to purple → blue → green → yellow → red.
   - `src/utils/spectrum.js` (SPECTRUM, spectrumColor/Rgb, hzToSpectrumT, STEM_COLORS, BAND_COLORS); `@theme` tokens for spec-* colours, ember re-pointed to yellow, zinc/stone/amber re-pointed to blue-biased neutrals; Syne / Albert Sans / DM Mono replace Satoshi / General Sans / JetBrains Mono.

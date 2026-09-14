@@ -6,3 +6,4 @@ export { useStemSeparation } from './useStemSeparation';
 export { usePageTitle } from './usePageTitle';
 export { useFocusTrap } from './useFocusTrap';
 export { useHelper } from './useHelper';
+export { useVault } from './useVault';

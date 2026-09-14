@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 // Hooks
-import { useAudioProcessor, useHistory, useStemSeparation, usePageTitle, useHelper } from '../hooks';
+import { useAudioProcessor, useHistory, useStemSeparation, usePageTitle, useHelper, useVault } from '../hooks';
+import { useSearchParams } from 'react-router-dom';
+import { vaultIdFor } from '../lib/vault';
 import { useAuth } from '../contexts/AuthContext';
 import { labAuthHeaders, getLabToken } from '../lib/labAuth';
 import { upload } from '@vercel/blob/client';
@@ -86,6 +88,7 @@ export function Analyze({ theme, t }) {
     error: separationError,
     keepStatus,
     separateStems,
+    restoreStems,
     getStemAudio,
     clearStems,
     cancelSeparation,
@@ -97,6 +100,11 @@ export function Analyze({ theme, t }) {
 
   // Local yt-dlp companion for link / search imports
   const helper = useHelper();
+
+  // The Vault — every separated track, auto-saved when stems land
+  const vault = useVault();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [restoringTrack, setRestoringTrack] = useState(null); // vault track being restored
 
 
   // UI state
@@ -844,7 +852,8 @@ export function Analyze({ theme, t }) {
       title: meta.title || 'Untitled',
       artist: meta.artist || meta.uploader || 'Unknown Artist',
       sourceFilename: meta.filename || 'import.flac',
-      thumbnailUrl: meta.thumbnailUrl || null,
+      // Prefer the platform's artwork URL (persists in the Vault); the helper's local copy is temporary
+      thumbnailUrl: meta.thumbnail || meta.thumbnailUrl || null,
       sourceUrl: meta.sourceUrl || null,
       source: meta.source || null,
     });
@@ -903,6 +912,85 @@ export function Analyze({ theme, t }) {
       key: keyInfo ? { key: keyInfo.key, mode: keyInfo.mode, camelot: keyInfo.camelot, compatibleKeys: keyInfo.compatibleKeys, confidence: keyInfo.confidence, alternatives: keyInfo.alternatives } : null,
     };
   }, [analysis?.features?.bpm, analysis?.features?.key, trackInfo, audioMetadata.artist, audioMetadata.title]);
+
+  // ---- Vault: save when stems are ready, update when stems are kept ----
+  const vaultUpsertRef = useRef(vault.upsertTrack);
+  useEffect(() => { vaultUpsertRef.current = vault.upsertTrack; }, [vault.upsertTrack]);
+
+  useEffect(() => {
+    if (separationStatus !== 'ready' || !stems || !audioBlobUrl) return;
+    const id = vaultIdFor(audioBlobUrl);
+    if (!id) return;
+    const stemEntries = {};
+    for (const [type, url] of Object.entries(stems)) {
+      if (!url) continue;
+      stemEntries[type] = {
+        url,
+        kept: keepStatus[type] === 'saved' || /\.public\.blob\.vercel-storage\.com/.test(url),
+        size: stemAudioData[type]?.byteLength || undefined,
+      };
+    }
+    vaultUpsertRef.current({
+      id,
+      title: audioMetadata.title || 'Untitled',
+      artist: audioMetadata.artist && !/^unknown artist$/i.test(audioMetadata.artist) ? audioMetadata.artist : null,
+      source: audioMetadata.source || (audioMetadata.sourceUrl ? 'link' : 'upload'),
+      sourceUrl: audioMetadata.sourceUrl || null,
+      thumbnailUrl: audioMetadata.thumbnailUrl && !/localhost|127\.0\.0\.1/.test(audioMetadata.thumbnailUrl) ? audioMetadata.thumbnailUrl : null,
+      duration: audio.duration || null,
+      bpm: stemMeta.bpm || null,
+      key: stemMeta.key ? { key: stemMeta.key.key, mode: stemMeta.key.mode, camelot: stemMeta.key.camelot, confidence: stemMeta.key.confidence } : null,
+      audioUrl: audioBlobUrl,
+      mode: separationMode,
+      stems: stemEntries,
+    });
+  }, [separationStatus, stems, keepStatus, audioBlobUrl, separationMode, stemAudioData, audioMetadata, audio.duration, stemMeta.bpm, stemMeta.key]);
+
+  // ---- Vault: restore a full session from /?track=<id> ----
+  const restoreStemsRef = useRef(restoreStems);
+  useEffect(() => { restoreStemsRef.current = restoreStems; }, [restoreStems]);
+  const getTrackRef = useRef(vault.getTrack);
+  useEffect(() => { getTrackRef.current = vault.getTrack; }, [vault.getTrack]);
+  const lastRestoredRef = useRef(null);
+
+  useEffect(() => {
+    const trackId = searchParams.get('track');
+    if (!trackId || trackId === lastRestoredRef.current) return;
+    const track = getTrackRef.current(trackId);
+    if (!track) return; // vault may still be loading — effect re-runs when tracks change
+    lastRestoredRef.current = trackId;
+
+    // Deliberately not cancellable: vault.tracks is replaced when the server refresh lands,
+    // which re-runs this effect — the in-flight restore must survive that.
+    (async () => {
+      setRestoringTrack(track);
+      setError(null);
+      try {
+        const res = await fetch(track.audioUrl);
+        if (!res.ok) throw new Error('The original upload is no longer available.');
+        const buffer = await res.arrayBuffer();
+        resetForNewAudio();
+        setAudioMetadata({
+          title: track.title || 'Untitled',
+          artist: track.artist || 'Unknown Artist',
+          sourceFilename: `${track.title || 'track'}.${(track.audioUrl.split('.').pop() || 'flac').split('?')[0]}`,
+          thumbnailUrl: track.thumbnailUrl || null,
+          sourceUrl: track.sourceUrl || null,
+          source: track.source || null,
+        });
+        setAudioFileData(buffer);
+        const stemUrls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]).filter(([, u]) => u));
+        if (Object.keys(stemUrls).length) restoreStemsRef.current(stemUrls, track.audioUrl, track.mode);
+        toast.success(`Restored ${track.artist ? `${track.artist} — ` : ''}${track.title}`);
+      } catch (err) {
+        setError(err.message || 'Could not restore this track.');
+      } finally {
+        setRestoringTrack(null);
+        setSearchParams({}, { replace: true });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, vault.tracks]);
 
   const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best' } = {}) => {
     if (!audioFileData) return;
@@ -1245,6 +1333,14 @@ Generated by SoundSauce`;
           isOpen={historyOpen}
           onToggle={toggleHistoryOpen}
         />
+
+        {/* Vault restore in progress */}
+        {restoringTrack && (
+          <div className={`flex items-center gap-3 p-3 mb-4 rounded-lg border font-mono text-[12px] ${theme === 'dark' ? 'bg-[#0D0F12] border-[#1C2027] text-[#9AA4B0]' : 'bg-white border-[#D9DDE3] text-[#4B5563]'}`}>
+            <Loader2 className="w-4 h-4 animate-spin text-ember-500" />
+            restoring {restoringTrack.artist ? `${restoringTrack.artist} — ` : ''}{restoringTrack.title} from the vault…
+          </div>
+        )}
 
         {/* Paste a link / search — via the local helper */}
         <LinkImport helper={helper} onImported={handleImported} disabled={isLoadingDemo} theme={theme} t={t} />

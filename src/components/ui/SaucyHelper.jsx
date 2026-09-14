@@ -15,6 +15,11 @@ const ROUTE_TIPS = {
     { title: 'Select a Region', tip: 'Drag on the waveform to highlight a section. Analyzing a short, isolated region gives much more accurate results.' },
     { title: 'Keyboard Shortcuts', tip: 'Space to play/pause, L to toggle loop, Esc to clear selection, arrow keys to skip.' },
   ],
+  '/vault': [
+    { title: 'Your Crate', tip: 'Every track you separate lands here with its stems, tempo and key. Kept stems never expire.' },
+    { title: 'Mixes With', tip: 'Hit the link icon on a track to see everything in a compatible key (Camelot neighbours) and tempo.' },
+    { title: 'Free Space', tip: 'Removing a track deletes its stems and source upload — the storage bar at the top shows the 1 GB budget.' },
+  ],
   '/settings': [
     { title: 'Set Your DAW', tip: 'Choose your DAW to get tailored plugin recommendations in every recipe.' },
     { title: 'Lock the Lab', tip: 'Separation and uploads cost money, so they sit behind the lab password.' },

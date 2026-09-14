@@ -8,6 +8,7 @@ import { trackPageView } from './lib/posthog';
 
 // Lazy-load pages for route-level code splitting
 const Analyze = lazy(() => import('./pages/Analyze').then(m => ({ default: m.Analyze })));
+const Vault = lazy(() => import('./pages/Vault').then(m => ({ default: m.Vault })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })));
 
@@ -21,7 +22,8 @@ function PageFallback() {
 
 /**
  * Remix Lab routes:
- *   /          Lab — drop a track, grab vocals / stems, analyze
+ *   /          Lab — drop a track, grab vocals / stems, analyze (/?track=<id> restores from the vault)
+ *   /vault     Vault — every separated track: search, key/tempo filters, re-download, restore, delete
  *   /settings  theme, DAW, lab lock
  *   /analyze   legacy URL → /
  */
@@ -49,6 +51,7 @@ export default function App() {
               </ErrorBoundary>
             } />
             <Route path="/analyze" element={<Navigate to="/" replace />} />
+            <Route path="/vault" element={<Vault theme={theme} t={t} />} />
             <Route path="/settings" element={<Settings theme={theme} t={t} onThemeToggle={handleThemeToggle} />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -330,6 +330,7 @@ function startJob(url) {
         source: sourceOf(info),
         size: stat.size,
         hasThumbnail: !!thumb,
+        thumbnail: bestThumbnail(info), // remote artwork URL — outlives the helper's temp files
         savedTo: fs.existsSync(dest) ? dest : null,
         _flacPath: path.join(dir, flac),
         _thumbPath: thumb ? path.join(dir, thumb) : null,
