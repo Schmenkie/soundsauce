@@ -15,38 +15,29 @@ This file provides context for AI assistants working on this project.
 
 It started life as a community "learn to recreate any sound" platform (Discover, likes, follows, DMs, challenges, Stripe tiers, Supabase). That version is preserved in git at commit **`c28e4f0`** ("Checkpoint: SoundSauce social platform before Remix Lab pivot") — restore any piece with `git checkout c28e4f0 -- <path>`. In September 2026 it was cut down to a single-user lab because the social layer never found users and the only feature in daily use was stem separation (Live 12 Standard lacks Suite's built-in separation).
 
-## Where Things Stand (handoff — updated 2026-09-14)
+## Where Things Stand (handoff — updated 2026-09-14, evening)
 
-**Deployed**: production at https://www.soundsauce.app runs commit `9bd3d28` (everything through the paste-a-link UX pass). Working tree is clean. Vercel CLI login is valid (`scurnow24-2856`). Deploy with `vercel build --prod && vercel deploy --prebuilt --prod`.
+**Deployed**: production at https://www.soundsauce.app runs commit `9bd3d28`. Everything below it (key detection, waveform colouring, Stem Player, To Live, batch grab, menubar app, Settings storage) is committed locally but **not yet deployed** — run `vercel build --prod && vercel deploy --prebuilt --prod`. The helper on the Mac must also be restarted to pick up `POST /stems` (`npm run menubar:install` does that and adds the status dot).
 
-**Daily workflow that works today**: run `npm run helper` (or install it once with `npm run helper:install`) → open the Lab → Cmd+V a YouTube/SoundCloud link → FLAC lands in the Lab and in `~/Music/Remix Lab/Sources/` → Grab Vocals → stems auto-keep to Blob and the track appears in `/vault` → `/calc` tells you transpose/tempo for your project.
+**Daily workflow**: menubar dot green → open the Lab → Cmd+V a YouTube/SoundCloud link (or a set/playlist → tick tracks → "Grab vocals from N") → FLAC lands in the Lab and `~/Music/Remix Lab/Sources/` → Grab Vocals → stems auto-keep to Blob, track appears in `/vault` → **To Live** writes the stems into `~/Music/Remix Lab/Stems/<Artist - Title>/` → Stem Player under the stem strips to solo/mute/loop bars → `/calc` for transpose/tempo.
 
-**Open feedback from Spencer**
-- Frequency-coloured waveforms "look like garbage" — keep the colour-is-frequency idea but calm it down (fewer hue changes, smoother mapping, or colour only the played portion). Not started.
-- Key detection must be right — verified on one track (Bb minor). Spot-check more with `scripts/key-check.mjs`.
+**Done this session (2026-09-14)** — items 1–4 of the queue: waveform colouring rework, key confidence hardening (benchmarked), Stem Player + Arrangement Map, all four production add-ons. See `### Completed`.
 
-**Next session — the agreed queue** (Spencer approved this order on 2026-09-14; start at the top):
+**Next session — remaining queue** (Spencer approved this order; start at the top):
 
-1. **Waveform colouring rework** (small) — current per-column spectral-centroid colouring reads as noise. Options: colour by section energy with 2–3 hues; or one neutral hue for unplayed + spectrum only on the played portion; or a smoothed centroid (moving average over ~1 s) with a narrower hue range. Keep "colour is frequency" as the idea, lose the confetti. Files: `WaveformVisualizer.jsx` (`columnColor`, `strokeColumns`), worker `GENERATE_WAVEFORM_COLORS`.
-2. **Key confidence hardening** (small, high value) — batch-run `scripts/key-check.mjs` over `~/Desktop/Mixing Mersic/*.mp3` (~15 tracks) and compare against known keys (Spencer knows them / Rekordbox has them). Tune `detectKey` weights (bass boost, harmonic decay, peak floor) until it's reliable. The calculator depends on it.
-3. **Stem Player + Arrangement Map** (medium) — synced mute/solo of all stems (multiple `AudioBufferSourceNode`s from `stemAudioData`), stacked colour-coded stem waveforms with a bar grid from BPM. Stem waveform data is already cached per stem in `Analyze.jsx` (`stemWaveformDataRef`). This is the "understand the original" step.
-4. **Production add-ons Spencer liked** (each small–medium):
-   - **Helper menubar app** — status icon (green = yt-dlp + ffmpeg healthy), "Open Sources folder", "Update yt-dlp" (`brew upgrade yt-dlp`), start/stop. Python `rumps` is the cheap route since yt-dlp already brings Python; keep `remix-helper.mjs` as the server and have the menubar app just supervise it.
-   - **Write into Live's browser** — helper endpoint that unpacks a Remix Pack straight into `~/Music/Remix Lab/Stems/<Artist - Title>/` (and the Vault's "pack" button offers "save to Sources" when the helper is online). Add `~/Music/Remix Lab/` to Live → Places once.
-   - **Batch grab** — paste a SoundCloud set / YouTube playlist → queue of vocal grabs. Helper `/resolve` already returns playlist entries; needs a queue UI in `LinkImport` and sequential `grab()` + `separateStems()`.
-   - **Blob budget in Settings** — surface `vault.storage` as "356 MB used · ~12 more tracks fit" (≈55 MB per two-stem grab).
-5. **Vocal chop kit** (medium) — onset-detect the vocal stem, slice at phrase gaps, export chops (folder or zip) with stamped names.
-6. **Anatomy of a Track** (medium) — per-stem analysis presented as a study guide; restyle the post-analysis step flow to Signal Deck while in there.
-7. **Remix Notes** (medium) — journal per vault track + public page.
-8. **Vault polish** — inline edit title/artist, tags, "re-separate as 4-stem", bulk Keep.
+1. **Vocal chop kit** (medium) — onset-detect the vocal stem, slice at phrase gaps, export chops (folder via the helper, or zip) with stamped names.
+2. **Anatomy of a Track** (medium) — per-stem analysis presented as a study guide; restyle the post-analysis step flow to Signal Deck while in there.
+3. **Remix Notes** (medium) — journal per vault track + public page.
+4. **Vault polish** — inline edit title/artist, tags, "re-separate as 4-stem", bulk Keep, per-track Blob size (a 6:36 track costs ~215 MB, not 55).
 
-Fun ideas parked for later: mashup preview in-browser (vocal A over instrumental B, calculator math applied live), Vault as a Camelot wheel, reference A/B, `.als` generation.
+Fun ideas parked for later: mashup preview in-browser (vocal A over instrumental B, calculator math applied live — the Stem Player's multi-source engine is most of the way there), Vault as a Camelot wheel, reference A/B, `.als` generation.
 
 **Gotchas for whoever picks this up**
 - The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`).
-- Vercel Blob is at ~360 MB / 1 GB after the test grabs; the Vault's delete button frees space.
-- The helper must be running on the Mac for link import — the deployed site can't do it alone.
+- Vercel Blob is at ~520 MB / 1 GB (two vault tracks + some orphans from testing); the Vault's delete button frees space.
+- The helper must be running on the Mac for link import and To Live — the deployed site can't do it alone. An orphaned helper from an earlier session may hold :7331 (`pkill -f remix-helper.mjs`).
 - `motion/react` welcome animations render blank in hidden Browser-pane screenshots; it's not a bug.
+- Key detection ground truth: `scripts/key-truth.json` (117 tracks, Camelot codes from Rekordbox via `pyrekordbox` reading `~/Library/Pioneer/rekordbox/master.db`). Re-run `node scripts/key-bench.mjs` after touching `detectKey`; the numbers to beat are in the comment above `KEY_DETECT_DEFAULTS`.
 
 ## Tech Stack
 
@@ -56,7 +47,7 @@ Fun ideas parked for later: mashup preview in-browser (vocal A over instrumental
 | Framework | React 19 + Vite 7 |
 | Styling | Tailwind CSS 4 — **Signal Deck** theme in `src/index.css` `@theme` (not `tailwind.config.js`); colour system in `src/utils/spectrum.js` |
 | Audio | Web Audio API + Web Worker DSP (`src/workers/audio.worker.js`) |
-| Track import | **Local helper** (`helper/remix-helper.mjs`, yt-dlp + ffmpeg on the Mac, `localhost:7331`) — paste a YouTube/SoundCloud link or search by name → FLAC + metadata |
+| Track import | **Local helper** (`helper/remix-helper.mjs`, yt-dlp + ffmpeg on the Mac, `localhost:7331`) — paste a YouTube/SoundCloud link, a playlist, or search by name → FLAC + metadata; also writes stems into Live's browser. `helper/menubar/` is a Python `rumps` status-dot app that supervises it |
 | Stem separation | Demucs on Replicate (`cjwbw/demucs`, models `htdemucs_ft` / `htdemucs` / `htdemucs_6s`), FLAC output |
 | Storage | Vercel Blob (source uploads + kept stems). ~1 GB on Hobby |
 | Auth | Single lab password → HMAC session token (`api/_auth.js`). No Supabase, no accounts |
@@ -85,10 +76,14 @@ audio-analyzer-pro/
 │   ├── check-stems.js           # Poll prediction; returns whatever stem keys the mode produced
 │   └── instrument.js            # Gemini zero-shot instrument labels; deletes its Blob upload after reading it
 ├── helper/
-│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files
-│   └── install-launchagent.sh   # Installs the helper as a macOS LaunchAgent (npm run helper:install)
+│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files, /stems
+│   ├── install-launchagent.sh   # Installs the helper alone as a LaunchAgent (npm run helper:install)
+│   └── menubar/                 # rumps menubar app (status dot, supervises the helper) + install.sh (npm run menubar:install)
 ├── scripts/
-│   └── dev-api.mjs              # Local runner for api/*.js on :3001 (Vite proxies /api there)
+│   ├── dev-api.mjs              # Local runner for api/*.js on :3001 (Vite proxies /api there)
+│   ├── key-check.mjs            # Run detectKey/detectBPM on one file
+│   ├── key-bench.mjs            # Score detectKey against key-truth.json (exact / relative / neighbour / wrong)
+│   └── key-truth.json           # 117 tracks from ~/Desktop/Mixing Mersic with Rekordbox Camelot keys
 ├── e2e/smoke.spec.js            # Playwright smoke tests (lab loads, /analyze redirect, settings, sign-in dialog)
 ├── src/
 │   ├── lib/
@@ -103,8 +98,8 @@ audio-analyzer-pro/
 │   │   ├── auth/LabSignIn.jsx   # Password modal (focus trap, dock auto-hide)
 │   │   ├── layout/Dock.jsx      # Vertical dock: Lab, Settings, theme, lock/unlock
 │   │   ├── layout/PageLayout.jsx
-│   │   ├── audio/               # LinkImport (paste link / search), AudioUploadSection, WaveformVisualizer, PlaybackControls,
-│   │   │                        # SpectrumAnalyzer, AnalyzeSection, InstrumentSelector, StemSelector, PresetSelector
+│   │   ├── audio/               # LinkImport (paste link / search / playlist batch), AudioUploadSection, WaveformVisualizer, PlaybackControls,
+│   │   │                        # SpectrumAnalyzer, AnalyzeSection, InstrumentSelector, StemSelector, StemPlayer (arrangement map), PresetSelector
 │   │   ├── analysis/            # AnalysisStepFlow, StepFlow, Step, ADSREnvelope, ResultsTabs, SoundRecipe (SoundSauce + VitalGuide)
 │   │   ├── comparison/ExportToolbar.jsx
 │   │   ├── history/HistoryPanel.jsx   # Recent analyses (localStorage) — interim until the Vault lands
@@ -113,6 +108,7 @@ audio-analyzer-pro/
 │   │   ├── useAudioProcessor.js # Web Audio playback + analysis orchestration (+ detectTempoAndKey proxy)
 │   │   ├── useAudioWorker.js    # Worker RPC (analyzeAudio, detectInstruments, detectTempoAndKey, spectral match, …)
 │   │   ├── useStemSeparation.js # Separation workflow, keep-to-Blob, stamped downloads, Remix Pack zip
+│   │   ├── useStemPlayer.js     # Synced multi-stem playback (own AudioContext, per-stem gains, loop), lane waveforms
 │   │   ├── useVault.js          # Vault state: cached load, serialised whole-index saves, upsertTrack/removeTrack
 │   │   ├── useHelper.js         # Helper availability (15s poll + focus), resolve(query), grab(url) with job progress
 │   │   ├── useHistory.js        # localStorage recent analyses
@@ -125,7 +121,7 @@ audio-analyzer-pro/
 │   │   └── NotFound.jsx
 │   ├── utils/
 │   │   ├── remixMath.js         # Pure calculator math: camelotOf, relativeKey, transposeSemitones, tempoChange, warpAdvice, compatibleTargets
-│   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl (shared by Lab + Vault)
+│   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl / saveStemsToLive (shared by Lab + Vault)
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes
 │   │   ├── constants.js, recommendations.js, demoSoundGenerator.js, validateEnv.js
@@ -159,7 +155,10 @@ yt-dlp cannot run on Vercel (Python + ffmpeg, and YouTube blocks datacenter IPs)
 - `POST /jobs {url}` → `yt-dlp -f bestaudio -x --audio-format flac --embed-metadata --write-info-json --write-thumbnail`; `GET /jobs/:id` reports `phase` (downloading/converting/finishing) + progress parsed from `--newline` output; `GET /files/:id` streams the FLAC, `/files/:id/thumb` the cover.
 - Metadata: `splitArtistTitle()` prefers yt-dlp's `artist`/`track`, else splits "Artist - Title", else uses the uploader; strips "(Official Video)" noise. Files are also copied to `~/Music/Remix Lab/Sources/<Artist - Title>.flac` for Live's browser.
 - Frontend: `useHelper()` polls `/health`; `LinkImport` shows a setup card when offline (with a copyable `npm run helper`), otherwise a paste/search box. With no audio loaded it renders as the Lab's hero ("Paste a link. Get the file."). A document-level `paste` listener means **Cmd+V anywhere on the page** with a media URL starts the grab; the button reads "Get file" for URLs and "Search" for text. After import the header shows a `save file` button (downloads the FLAC from memory) and the toast names the file saved under `~/Music/Remix Lab/Sources/`. `Analyze.handleImported()` loads the FLAC exactly like an upload and sets `audioMetadata` (artist, title, thumbnailUrl, sourceUrl) — the header shows the artwork and stem filenames get the real artist.
-- Keep yt-dlp current (`brew upgrade yt-dlp`) — YouTube breaks old versions every few months; the helper's `/health` reports the version.
+- Keep yt-dlp current (`brew upgrade yt-dlp`) — YouTube breaks old versions every few months; the helper's `/health` reports the version (the menubar app has an "Update yt-dlp" item).
+- **`POST /stems {folder, files:[{name,url}], notes}`** — the helper fetches each stem URL (only `*.public.blob.vercel-storage.com` / `replicate.delivery` hosts) into `~/Music/Remix Lab/Stems/<folder>/` and writes `notes.txt`. Client: `saveStemsToLive(stemUrls, meta, mode)` in `utils/remixPack.js`; "To Live" button in the Lab's stems-ready panel and "to live" on Vault cards (only rendered while `helper.online`). Add `~/Music/Remix Lab/` to Live → Places once.
+- **Batch grab**: a playlist / set URL resolves to its entries; `LinkImport` shows checkboxes + "Grab vocals from N". `Analyze.jsx` runs an effect-driven queue (`batch` state: grab → `load` waits for `trackInfo` so filenames get stamped, 15 s fallback → `separate` (vocals/best) → `keep` waits for every stem `saved` → next), with a progress strip and per-track log; "stop" cancels. Requires the lab to be unlocked. Verified on `soundcloud.com/oden_and_fatzo/tracks`.
+- **Menubar app** (`helper/menubar/remix_menubar.py`, Python `rumps`): 🟢 healthy / 🟡 missing yt-dlp or ffmpeg / 🔴 offline, polls `/health` every 10 s, starts the helper if nothing answers (and restarts it after a crash), menu: Open the Lab, Open Sources/Stems folder, Update yt-dlp (brew), Restart helper, Show log. `npm run menubar:install` creates a venv in `~/Library/Application Support/Remix Lab/`, installs rumps, writes the `app.soundsauce.remix-menubar` LaunchAgent and removes the older helper-only agent so they don't fight over :7331.
 
 ### The Vault
 
@@ -211,7 +210,13 @@ Browser                         Vercel Blob        api/*                        
 
 ### The Lab page (`src/pages/Analyze.jsx`)
 
-Route `/` (legacy `/analyze` redirects). Flow: upload → waveform (drag-to-select region, 64× zoom) → header BPM/key chip → `StemSelector` (mode picker → progress → stem cards) → `AnalyzeSection` → post-analysis `AnalysisStepFlow` (Identify → Preset → Recreate → Full Analysis). Stem waveform swap, per-stem loop regions, stem-aware playback and Gemini refinement are unchanged from the original analyzer (see `CLAUDE.md` at `c28e4f0` for the deep-dive). Recent analyses persist in localStorage via `useHistory`/`HistoryPanel` until the Vault replaces them.
+Route `/` (legacy `/analyze` redirects). Flow: upload → waveform (drag-to-select region, 64× zoom) → header BPM/key chip → `StemSelector` (mode picker → progress → stem cards) → **`StemPlayer`** (when stems are ready) → `AnalyzeSection` → post-analysis `AnalysisStepFlow` (Identify → Preset → Recreate → Full Analysis).
+
+### Stem Player + Arrangement Map
+
+`useStemPlayer({ stemTypes, getStemAudio, onPlay })` owns a second AudioContext: every stem decoded once, one `AudioBufferSourceNode` per stem → per-stem `GainNode` → master, all started on the same timestamp. Mute/solo (`stemGain(type, muted, soloed)` — solo wins) only touch gains; seek and loop rebuild the sources; `positionRef` is read by the UI at 60 fps. It is mutually exclusive with the single-source player: `onPlay` pauses `useAudioProcessor`, and `handleTogglePlayback` / `handlePlayStem` call `stemPlayer.pause()`.
+
+`StemPlayer.jsx` draws one lane per stem (min/max from `summarise()`, 1200 columns, stem colour, greyed when silent) under a ruler, plus a bar grid from the header BPM (every bar faint, every 4 bars = phrase, every 16 = section; labels thin out with width). Click = seek, drag = loop snapped to bars, "bar 1 here" pins the downbeat to the playhead and ◀ ▶ nudge it a beat. Space toggles play when the map is focused. Stem waveform swap, per-stem loop regions, stem-aware playback and Gemini refinement are unchanged from the original analyzer (see `CLAUDE.md` at `c28e4f0` for the deep-dive). Recent analyses persist in localStorage via `useHistory`/`HistoryPanel` until the Vault replaces them.
 
 ### Local development
 
@@ -343,7 +348,7 @@ Custom hook encapsulating all Web Audio API logic with proper memory leak preven
 | high-mids | yellow | `#FACC15` | drums stems, **the single accent** (`ember-*` scale now points here), BPM chip, playhead, primary buttons |
 | air | red | `#EF4444` | vocal stems, errors |
 
-- **Waveforms are coloured by spectral centroid** — the worker's `GENERATE_WAVEFORM_COLORS` returns one t∈[0,1] per column (2048-pt FFT, log scale 40 Hz–12 kHz); `WaveformVisualizer` strokes each pixel column in `spectrumColor(t)` (dimmed when unplayed, full when played). Stem waveforms get their own map.
+- **Waveforms are coloured by spectral centroid** — the worker's `GENERATE_WAVEFORM_COLORS` returns one t∈[0,1] per column: up to 6 × 2048-pt FFTs averaged per column, then a ~1.2 s moving average, mapped on a log scale from 120 Hz to 8 kHz (a full mix sits green–yellow, a filtered breakdown goes blue). `WaveformVisualizer` draws unplayed columns as the neutral grey pulled 35% toward the spectrum colour (`UNPLAYED_SPECTRUM_MIX`) and the played portion in full colour — colour is revealed by playing. The earlier one-FFT-per-column version read as confetti. Stem waveforms get their own map.
 - **SpectrumAnalyzer** bars wear the colour of their frequency; the ruler under it is the legend for the whole system. `MiniSpectrum` (5-band meter, one bar per hue) sits in every stem card and animates from `spectrumDataRef` while that stem plays.
 - **Stem strips** (`StemSelector`): left colour stripe from `stemColor(type)`, Syne uppercase title, mono readout grid (`format` / `state`), live meter, mono lowercase buttons.
 - **Ground**: near-black `#050607` with a 40px hairline grid (`.bg-grid-dark` / `.bg-grid-light`); panels `#0D0F12`, elevated `#14171C`, hairlines `#1C2027`. Light theme: `#F5F6F8` ground, white panels, `#D9DDE3` hairlines. Neutrals are blue-biased; `zinc-*` / `stone-*` / `amber-*` Tailwind tokens are **re-pointed in `@theme`** so legacy classes re-skin automatically.
@@ -374,7 +379,11 @@ npm run dev          # Vite only (no /api) — fine for UI work
 npm run dev:api      # Serverless functions on :3001 (loads .env.local + .env.local.vercel)
 npm run dev:full     # Vite + API + helper together (Browser-pane config: "full")
 npm run helper       # Local yt-dlp companion only (localhost:7331)
-npm run helper:install  # Install the helper as a macOS LaunchAgent (starts at login)
+npm run helper:install  # Install the helper alone as a macOS LaunchAgent (starts at login)
+npm run menubar         # Run the status-dot menubar app in the foreground (needs `pip install rumps`)
+npm run menubar:install # Install the menubar app (+ helper supervision) as a login item
+node scripts/key-check.mjs "<file>"      # Key + BPM for one file
+node scripts/key-bench.mjs [--verbose]   # Score detectKey against scripts/key-truth.json
 npm run build        # Production build to /dist (frontend only)
 npm run lint         # ESLint
 npm run test:run     # Vitest once (60 tests: DSP, curated presets, remix math, a11y)
@@ -417,7 +426,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 | 2c | **Signal Deck UI** | ✅ Foundation done | Chosen from 3 mock directions. Tokens, fonts, grid, Dock, header, frequency-coloured waveform, spectrum analyzer, stem channel strips with live meters. Remaining: AnalysisStepFlow content cards, Settings polish |
 | 3 | **Acapella Vault** (`/vault`) | ✅ Done | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
 | 4 | **Remix Calculator** (`/calc`) | ✅ Done | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
-| 5 | **Stem Player + Arrangement Map** | Planned | Synced mute/solo of all stems; stacked stem waveforms with a bar grid from BPM (stem waveform data is already cached per stem in Analyze) |
+| 5 | **Stem Player + Arrangement Map** | ✅ Done | `useStemPlayer` + `StemPlayer`: synced mute/solo, stacked lanes, bar grid, drag-to-loop |
 | 6 | **Anatomy of a Track** | Planned | Run the analysis pipeline per stem and present it as a study guide (reframes InstrumentSelector / ADSR / feature cards) |
 | 7 | **Remix Notes** (`/notes`) | Planned | Journal per vault item: source, what was pulled, key/tempo changes, lessons, SoundCloud link of the result. Public-facing portfolio |
 | 8 | **Compatibility Finder** | Planned | Camelot neighbours ± tempo window over the vault, client-side |
@@ -432,6 +441,14 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Queue items 1–4** (Sep 14 2026, evening session)
+  - **Waveform colouring rework** — `GENERATE_WAVEFORM_COLORS` averages several FFTs per column and smooths ~1.2 s, range narrowed to 120 Hz–8 kHz; unplayed = neutral + 35% tint, played = full colour.
+  - **Key confidence hardening** — ground truth pulled from Rekordbox's SQLCipher DB with `pyrekordbox` (117 of the Mixing Mersic tracks); `scripts/key-bench.mjs`; extractor rewritten (top-12 peaks, window normalisation, tuning correction, no harmonic voting) and profiles learned from the library. 46% → 65% exact, 35% → 13% wrong; confidence now separates wrong (avg 67) from right (avg 81). Tell Me What You Want → Bb minor 3A still.
+  - **Stem Player + Arrangement Map** — `src/hooks/useStemPlayer.js`, `src/components/audio/StemPlayer.jsx`, wired under `StemSelector` in `Analyze.jsx`; `stemTypes` in `useStemSeparation` is now memoised.
+  - **To Live** — helper `POST /stems` + `saveStemsToLive()`; buttons in Lab + Vault. Verified: two FLACs + notes.txt in `~/Music/Remix Lab/Stems/…` in ~2 s.
+  - **Batch grab** — playlist checkboxes + queue state machine in `Analyze.jsx`; verified on a SoundCloud artist page with one track ("Lauren" is now in the vault).
+  - **Menubar app** — `helper/menubar/` (rumps) + `npm run menubar`, `menubar:install`.
+  - **Blob budget in Settings** — `describeStorage()` / `formatMB()` / `BLOB_LIMIT_BYTES` in `lib/vault.js` (shared with the Vault header); Settings shows "305 MB of 1 GB used · ~13 more tracks fit".
 - [x] **Paste-a-link UX pass** (Sep 14 2026) — `LinkImport` hero mode, global Cmd+V paste, "Get file" CTA, copyable helper command when offline; `Analyze` keeps `savedTo`/`importFilename` in `audioMetadata`, header `save file` button, clearer toast; upload card becomes "Or drop a file".
 - [x] **Remix Calculator** (Sep 2026) — `utils/remixMath.js` (+9 tests), `pages/Calc.jsx`, Dock item, vault card link, SaucyHelper tips. Verified: Bb min vocal → C min project = +2 st / −3.1%; → Db maj = 0 st via relative.
 - [x] **Key detection fix** (Sep 2026) — `detectKey` analysed only the first ~1.4 s, mislabelled pitch classes by 9 semitones, and inverted the K-S rotation. Now: 200 windows across the whole track, harmonic pitch-class profile from spectral peaks (f/1..f/4, bass boost), confidence + alternatives. Tell Me What You Want → Bb minor 3A (was E/G#/F#m). `scripts/key-check.mjs` runs the detector on any file. Conventional flat spellings via `displayKeyName()`.
@@ -493,12 +510,13 @@ The `useAudioProcessor` hook implements comprehensive cleanup:
 - Checks half and double tempo for accuracy
 - Returns confidence score, suggested tempo, and tempo range
 
-**Key Detection**
-- Calculates 12-bin chroma features using FFT
-- Uses Pearson correlation (not just dot product) for accuracy
-- Correlates against Krumhansl-Schmuckler major/minor profiles
-- Energy-weighted windows for better accuracy
-- Returns key, mode, Camelot code, scale notes, compatible keys, confidence
+**Key Detection** (`detectKey(channelData, sampleRate, options)` — options default to `KEY_DETECT_DEFAULTS`)
+- 200 × 8192-pt windows spread over the whole track; per window the 12 loudest spectral peaks between 65 Hz and 2.1 kHz (parabolic interpolation) vote for their pitch class; each window's chroma is max-normalised before averaging so loud sections don't dominate; near-silent windows are skipped
+- Tuning correction: circular mean of the peaks' fractional-semitone offsets is folded out before binning (`tuningCents` in the result) — pitched edits and old records aren't at A440
+- Pearson correlation against the `lab` profiles: 75% learned from the 117-track library (mean standardised chroma rotated to the Rekordbox tonic) + 25% standardised Krumhansl-Schmuckler (restores the third enough to break tonic/dominant ties). `ks` and `temperley` profiles are still selectable via `options.profiles`
+- Confidence ≈ `-40 + 140·corr` (+ up to 10 for margin): below ~60 the header chip shows `~`. On the benchmark corr < 0.7 was usable only half the time, ≥ 0.7 about 90%
+- Benchmark (`scripts/key-bench.mjs`): 65% exact · 87% usable (exact / relative / ±1 Camelot) · 13% wrong, leave-one-out 64 / 87 / 13. Was 46 / 65 / 35 with K-S profiles + the old extractor. Tried and rejected (documented above `KEY_DETECT_DEFAULTS`): harmonic sub-voting, 16k/32k windows, bass-only chroma, per-segment voting, discriminatively trained profiles
+- Returns key, mode, Camelot code, scale notes, compatible keys, confidence, alternatives, chroma
 
 **Waveform Detection**
 - Skips attack transient (uses ADSR attack time + 10ms safety margin)
