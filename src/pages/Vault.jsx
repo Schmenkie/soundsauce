@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput, NotebookPen, Pencil, Tag, Layers, Check } from 'lucide-react';
+import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput, NotebookPen, Pencil, Tag, Layers, ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVault, usePageTitle, useHelper } from '../hooks';
 import { useToast } from '../components/ui/Toast';
@@ -55,14 +55,27 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
   };
   const removeTag = (tag) => onUpdate(track, { tags: tags.filter(x => x !== tag) });
 
+  const iconBtn = `w-9 h-9 flex items-center justify-center rounded-md border transition-colors ${
+    isDark ? 'border-transparent text-[#7C8794] hover:border-[#2A3039] hover:text-[#E8ECF1]' : 'border-transparent text-[#6B7280] hover:border-[#B8BEC7] hover:text-[#0F1216]'
+  }`;
+  const secondaryBtn = `h-10 px-3 flex items-center justify-center gap-1.5 rounded-md border font-mono text-[12px] whitespace-nowrap transition-colors disabled:opacity-50 ${
+    isDark ? 'bg-[#14171C] border-[#1C2027] text-[#E8ECF1] hover:border-[#2A3039]' : 'bg-[#F5F6F8] border-[#D9DDE3] text-[#0F1216] hover:border-[#B8BEC7]'
+  }`;
+  const meta = [
+    track.duration ? formatDuration(track.duration) : null,
+    bytes ? formatMB(bytes) : null,
+    track.source || null,
+  ].filter(Boolean).join(' · ');
+
   return (
     <article
-      className={`relative rounded-lg border p-4 flex flex-col gap-3 transition-colors ${
+      className={`group relative rounded-lg border p-4 flex flex-col gap-3 transition-colors ${
         isReference
           ? isDark ? 'bg-[#14171C] border-ember-500 ring-signal' : 'bg-white border-ember-600 ring-signal'
           : isDark ? 'bg-[#0D0F12] border-[#1C2027] hover:border-[#2A3039]' : 'bg-white border-[#D9DDE3] hover:border-[#B8BEC7]'
       }`}
     >
+      {/* Identity */}
       <div className="flex items-start gap-3">
         <div
           className={`w-14 h-14 rounded-md overflow-hidden flex-shrink-0 border flex items-center justify-center ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-[#EDEFF3] border-[#D9DDE3]'}`}
@@ -78,48 +91,54 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
               <button type="submit" className="sr-only">Save</button>
             </form>
           ) : (
-            <div className="group/title">
-              <h3 className={`font-display font-bold uppercase tracking-tight text-[14px] leading-tight ${t.text} line-clamp-2`}>
+            <>
+              <h3 className={`font-display font-bold uppercase tracking-tight text-[14px] leading-tight truncate ${t.text}`} title={track.title}>
                 {track.title}
-                <button type="button" onClick={() => { setDraft({ title: track.title || '', artist: track.artist || '' }); setEditing(true); }} className={`ml-1.5 align-middle opacity-0 group-hover/title:opacity-100 focus:opacity-100 ${t.textDimmed} hover:text-ember-500`} aria-label={`Edit title and artist of ${track.title}`} title="Edit title / artist">
-                  <Pencil className="w-3 h-3 inline" />
-                </button>
               </h3>
-              <p className={`font-mono text-[11px] mt-0.5 truncate ${t.textMuted}`}>
-                {track.artist || 'unknown artist'}{track.duration ? ` — ${formatDuration(track.duration)}` : ''}{track.source ? ` — ${track.source}` : ''}{bytes ? ` — ${formatMB(bytes)}` : ''}
-              </p>
-            </div>
+              <p className={`font-mono text-[11px] mt-0.5 truncate ${t.textMuted}`} title={track.artist || ''}>{track.artist || 'unknown artist'}</p>
+            </>
           )}
-          <div className="flex flex-wrap gap-1.5 mt-2">
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
             {track.bpm && <Chip theme={theme} color={isDark ? '#FACC15' : '#A16207'}>{Math.round(track.bpm)} BPM</Chip>}
             {keyName && (
               <Chip theme={theme} color={isDark ? '#3B82F6' : '#1D4ED8'} title={track.key.confidence != null ? `confidence ${track.key.confidence}%` : undefined}>
-                {track.key.confidence != null && track.key.confidence < 70 ? '~ ' : ''}{keyName}{track.key.camelot ? ` / ${track.key.camelot}` : ''}
+                {track.key.confidence != null && track.key.confidence < 60 ? '~ ' : ''}{keyName}{track.key.camelot ? ` / ${track.key.camelot}` : ''}
               </Chip>
             )}
-          </div>
-          {/* Tags */}
-          <div className="flex flex-wrap items-center gap-1 mt-1.5">
-            {tags.map(tag => (
-              <span key={tag} className={`inline-flex items-center gap-0.5 pl-1.5 pr-1 h-5 rounded font-mono text-[10px] ${isDark ? 'bg-[#14171C] text-[#9AA4B0]' : 'bg-[#EDEFF3] text-[#4B5563]'}`}>
-                <button type="button" onClick={() => onTagClick(tag)} className="hover:text-ember-500" title={`Filter by #${tag}`}>#{tag}</button>
-                <button type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`} className="hover:text-red-500"><X className="w-2.5 h-2.5" /></button>
-              </span>
-            ))}
-            {addingTag ? (
-              <form onSubmit={(e) => { e.preventDefault(); addTag(); }}>
-                <input autoFocus value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onBlur={addTag} onKeyDown={(e) => { if (e.key === 'Escape') { setTagDraft(''); setAddingTag(false); } }} aria-label="New tag" placeholder="tag" className={`w-20 h-5 px-1.5 rounded font-mono text-[10px] outline-none border ${isDark ? 'bg-[#0A0C0F] border-ember-500/60 text-[#E8ECF1]' : 'bg-white border-ember-600/60 text-[#0F1216]'}`} />
-              </form>
-            ) : (
-              <button type="button" onClick={() => setAddingTag(true)} className={`inline-flex items-center gap-0.5 h-5 px-1.5 rounded font-mono text-[10px] ${t.textDimmed} hover:text-ember-500`} aria-label={`Add a tag to ${track.title}`}>
-                <Tag className="w-2.5 h-2.5" /> tag
-              </button>
-            )}
+            {meta && <span className={`font-mono text-[10px] ${t.textDimmed}`}>{meta}</span>}
           </div>
         </div>
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => { setDraft({ title: track.title || '', artist: track.artist || '' }); setEditing(true); }}
+            className={`${iconBtn} w-8 h-8 -mr-1 -mt-1 opacity-0 group-hover:opacity-100 focus:opacity-100`}
+            aria-label={`Edit title and artist of ${track.title}`}
+            title="Edit title / artist"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
-      {/* Stem strips */}
+      {/* Tags — only take space when there are some (or while adding) */}
+      {(tags.length > 0 || addingTag) && (
+        <div className="flex flex-wrap items-center gap-1 -mt-1">
+          {tags.map(tag => (
+            <span key={tag} className={`inline-flex items-center gap-0.5 pl-1.5 pr-1 h-5 rounded font-mono text-[10px] ${isDark ? 'bg-[#14171C] text-[#9AA4B0]' : 'bg-[#EDEFF3] text-[#4B5563]'}`}>
+              <button type="button" onClick={() => onTagClick(tag)} className="hover:text-ember-500" title={`Filter by #${tag}`}>#{tag}</button>
+              <button type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`} className="hover:text-red-500"><X className="w-2.5 h-2.5" /></button>
+            </span>
+          ))}
+          {addingTag && (
+            <form onSubmit={(e) => { e.preventDefault(); addTag(); }}>
+              <input autoFocus value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onBlur={addTag} onKeyDown={(e) => { if (e.key === 'Escape') { setTagDraft(''); setAddingTag(false); } }} aria-label="New tag" placeholder="tag" className={`w-24 h-5 px-1.5 rounded font-mono text-[10px] outline-none border ${isDark ? 'bg-[#0A0C0F] border-ember-500/60 text-[#E8ECF1]' : 'bg-white border-ember-600/60 text-[#0F1216]'}`} />
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* Stems */}
       <div className="flex flex-col gap-1.5">
         {stems.map((k) => {
           const c = stemColor(k);
@@ -159,89 +178,64 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
         {stems.length === 0 && <p className={`font-mono text-[11px] ${t.textDimmed}`}>no stems — open in the lab to separate</p>}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2 mt-auto pt-1">
+      {/* Primary + daily actions */}
+      <div className="flex items-center gap-2 mt-auto">
         <Link
           to={`/?track=${encodeURIComponent(track.id)}`}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-[12px] font-semibold ${isDark ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'}`}
+          className={`flex-1 h-10 flex items-center justify-center gap-1.5 px-3 rounded-md text-[12px] font-semibold whitespace-nowrap ${isDark ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'}`}
         >
           <FlaskConical className="w-3.5 h-3.5" /> Open in Lab
         </Link>
-        {stems.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onPack(track)}
-            disabled={!!busy}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-mono text-[12px] disabled:opacity-50 ${t.button}`}
-            title="Download all stems + notes.txt"
-          >
-            {busy === `pack:${track.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">pack</span>
-          </button>
-        )}
         {stems.length > 0 && onSaveToLive && (
-          <button
-            type="button"
-            onClick={() => onSaveToLive(track)}
-            disabled={!!busy}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-mono text-[12px] disabled:opacity-50 ${t.button}`}
-            title="Write the stems into ~/Music/Remix Lab/Stems/ (Live's browser)"
-          >
-            {busy === `live:${track.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderInput className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">to live</span>
+          <button type="button" onClick={() => onSaveToLive(track)} disabled={!!busy} className={secondaryBtn} title="Write the stems into ~/Music/Remix Lab/Stems/ (Live's browser)">
+            {busy === `live:${track.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderInput className="w-3.5 h-3.5" />} to live
           </button>
         )}
-        <Link
-          to={`/calc?track=${encodeURIComponent(track.id)}`}
-          className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
-          title="Open in the Remix Calculator"
-          aria-label={`Open ${track.title} in the calculator`}
-        >
-          <Calculator className="w-3.5 h-3.5" />
-        </Link>
-        {track.mode !== 'stems4' && (
-          <Link
-            to={`/?track=${encodeURIComponent(track.id)}&mode=stems4`}
-            className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
-            title="Re-separate as 4 stems (vocals / drums / bass / other) — replaces these stems"
-            aria-label={`Re-separate ${track.title} as 4 stems`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </Link>
+        {stems.length > 0 && (
+          <button type="button" onClick={() => onPack(track)} disabled={!!busy} className={secondaryBtn} title="Download all stems + notes.txt as a zip">
+            {busy === `pack:${track.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />} pack
+          </button>
         )}
-        <Link
-          to={`/notes?track=${encodeURIComponent(track.id)}`}
-          className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
-          title="Remix notes"
-          aria-label={`Notes for ${track.title}`}
-        >
-          <NotebookPen className="w-3.5 h-3.5" />
-        </Link>
-        <button
-          type="button"
-          onClick={() => onSetReference(isReference ? null : track)}
-          className={`px-3 py-2 rounded-md font-mono text-[12px] ${isReference ? (isDark ? 'bg-[#14171C] border border-ember-500 text-ember-500' : 'bg-white border border-ember-600 text-ember-600') : t.button}`}
-          title="Show tracks that mix with this one (Camelot neighbours, ±8% tempo)"
-          aria-pressed={isReference}
-        >
-          <Link2 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onRemove(track)}
-          disabled={!!busy}
-          className={`px-3 py-2 rounded-md font-mono text-[12px] disabled:opacity-50 ${t.button} hover:!border-red-500/60 hover:!text-red-500`}
-          aria-label={`Remove ${track.title} from the vault`}
-          title="Remove and delete its files"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
       </div>
-      {track.sourceUrl && (
-        <a href={track.sourceUrl} target="_blank" rel="noreferrer" className={`font-mono text-[10px] truncate ${t.textDimmed} hover:text-ember-500`}>
-          {track.sourceUrl.replace(/^https?:\/\/(www\.)?/, '')}
-        </a>
-      )}
+
+      {/* Utility row — quiet icons, never wraps */}
+      <div className={`flex items-center justify-between -mb-1 -mx-1 pt-2 border-t ${isDark ? 'border-[#1C2027]' : 'border-[#EDEFF3]'}`}>
+        <div className="flex items-center">
+          <Link to={`/calc?track=${encodeURIComponent(track.id)}`} className={iconBtn} title="Remix Calculator — transpose / tempo for your project" aria-label={`Open ${track.title} in the calculator`}><Calculator className="w-4 h-4" /></Link>
+          <Link to={`/notes?track=${encodeURIComponent(track.id)}`} className={iconBtn} title="Remix notes" aria-label={`Notes for ${track.title}`}><NotebookPen className="w-4 h-4" /></Link>
+          <button
+            type="button"
+            onClick={() => onSetReference(isReference ? null : track)}
+            className={`${iconBtn} ${isReference ? (isDark ? '!border-ember-500 !text-ember-500' : '!border-ember-600 !text-ember-600') : ''}`}
+            title="Mixes with — show tracks in a compatible key and tempo"
+            aria-pressed={isReference}
+            aria-label={`Show tracks that mix with ${track.title}`}
+          >
+            <Link2 className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={() => setAddingTag(true)} className={iconBtn} title="Add a tag" aria-label={`Add a tag to ${track.title}`}><Tag className="w-4 h-4" /></button>
+          {track.mode !== 'stems4' && (
+            <Link to={`/?track=${encodeURIComponent(track.id)}&mode=stems4`} className={iconBtn} title="Re-separate as 4 stems (vocals / drums / bass / other) — runs Demucs again" aria-label={`Re-separate ${track.title} as 4 stems`}><Layers className="w-4 h-4" /></Link>
+          )}
+        </div>
+        <div className="flex items-center">
+          {track.sourceUrl && (
+            <a href={track.sourceUrl} target="_blank" rel="noreferrer" className={iconBtn} title={track.sourceUrl.replace(/^https?:\/\/(www\.)?/, '')} aria-label="Open the original">
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => onRemove(track)}
+            disabled={!!busy}
+            className={`${iconBtn} hover:!text-red-500 hover:!border-red-500/50 disabled:opacity-40`}
+            aria-label={`Remove ${track.title} from the vault`}
+            title="Remove from the vault and delete its files from storage"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </article>
   );
 }

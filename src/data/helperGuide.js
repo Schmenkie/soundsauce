@@ -130,6 +130,7 @@ export const GUIDE = {
           { name: 'calculator', cost: 'free', what: 'Opens /calc with this track as the vocal source.' },
           { name: 'notes', cost: 'free', what: 'Opens the Remix Notes entry for this track.' },
           { name: 'link (mixes with)', cost: 'free', what: 'Filters the vault to compatible keys and tempos.' },
+          { name: 'arrow (original)', cost: 'free', what: 'Opens the YouTube / SoundCloud page the track came from.' },
           { name: 'trash', cost: 'free', what: 'Removes the entry and deletes its stems and source from Blob — this is how you get space back. Files already in ~/Music/Remix Lab are untouched.' },
           { name: 'keep / keep all (N)', cost: 'blob', what: 'Re-hosts temporary stems before they expire. Kept = green cloud.' },
           { name: 'Stem ↓', cost: 'download', what: 'Saves one stem as a stamped FLAC.' },
@@ -138,8 +139,8 @@ export const GUIDE = {
       {
         title: 'Editing',
         items: [
-          { name: 'Pencil on the title', cost: 'free', what: 'Inline edit of title and artist (Enter saves, Esc cancels). Filenames use these.' },
-          { name: 'tag', cost: 'free', what: 'Add #tags to a track; the chips above the grid filter by tag. × on a tag removes it.' },
+          { name: 'Pencil (hover the card)', cost: 'free', what: 'Inline edit of title and artist (Enter saves, Esc cancels). Filenames use these.' },
+          { name: 'tag icon', cost: 'free', what: 'Add #tags to a track; the chips above the grid filter by tag. × on a tag removes it.' },
           { name: 'Size on the card', cost: 'free', what: 'How many MB this track\'s stems take on Blob.' },
         ],
       },
