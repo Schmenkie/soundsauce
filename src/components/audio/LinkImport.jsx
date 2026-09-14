@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link2, Search, Loader2, Download, Clipboard, ChevronDown, ChevronUp, Music, X, ListMusic, Check, Copy } from 'lucide-react';
+import { Link2, Search, Loader2, Download, Clipboard, ChevronDown, ChevronUp, Music, X, ListMusic, Check, Copy, Mic, Square, AlertTriangle } from 'lucide-react';
 import { extractMediaUrl, formatDuration } from '../../lib/helper';
 
 /**
@@ -8,11 +8,17 @@ import { extractMediaUrl, formatDuration } from '../../lib/helper';
  *
  * Props come from useHelper(): online, health, checking, resolving, resolve, job, grab.
  * onImported({ arrayBuffer, meta }) hands the file to the Lab.
+ *
+ * A playlist / set URL resolves to its entries: tick the ones you want and "grab vocals"
+ * queues them — onBatch(items) runs grab → separate → keep for each, and `batch` reports
+ * progress back ({ items, index, phase, log, done }).
  */
-export function LinkImport({ helper, onImported, disabled, hero = false, theme, t }) {
+export function LinkImport({ helper, onImported, onBatch, batch, onCancelBatch, disabled, hero = false, theme, t }) {
   const { online, health, checking, resolving, resolve, job, grab } = helper;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
+  const [fromPlaylist, setFromPlaylist] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
   const [error, setError] = useState(null);
   const [clipboardUrl, setClipboardUrl] = useState(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -63,10 +69,15 @@ export function LinkImport({ helper, onImported, disabled, hero = false, theme, 
     if (!trimmed || resolving) return;
     setError(null);
     setResults([]);
+    setFromPlaylist(false);
     try {
       const list = await resolve(trimmed);
       if (list.length === 0) setError('Nothing found for that.');
       setResults(list);
+      // A playlist / set URL comes back as its entries — offer them as a batch
+      const playlist = !!extractMediaUrl(trimmed) && list.length > 1;
+      setFromPlaylist(playlist);
+      setSelected(new Set(playlist ? list.filter(r => !r.isPlaylist).map(r => r.url) : []));
       // A pasted single-track URL resolves to exactly one result — go straight to grabbing
       if (list.length === 1 && extractMediaUrl(trimmed) && !list[0].isPlaylist) {
         await handleGrab(list[0]);
@@ -95,11 +106,35 @@ export function LinkImport({ helper, onImported, disabled, hero = false, theme, 
     }
   };
 
+  const toggleSelected = (url) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url); else next.add(url);
+      return next;
+    });
+  };
+
+  const startBatch = () => {
+    const items = results.filter(r => !r.isPlaylist && selected.has(r.url));
+    if (items.length === 0 || !onBatch) return;
+    onBatch(items.map(r => ({ url: r.url, title: r.title, artist: r.artist || r.uploader || '' })));
+    setResults([]);
+    setQuery('');
+    setFromPlaylist(false);
+  };
+
   const useClipboard = () => {
     if (!clipboardUrl) return;
     setQuery(clipboardUrl);
     setClipboardUrl(null);
     handleResolve(clipboardUrl);
+  };
+
+  const batchPhaseLabel = {
+    grab: 'downloading',
+    load: 'reading tempo + key',
+    separate: 'separating vocals',
+    keep: 'keeping stems',
   };
 
   const phaseLabel = {
@@ -218,8 +253,47 @@ npm run helper:install`}
         </button>
       )}
 
+      {/* Batch queue status */}
+      {batch && (
+        <div className={`mt-3 p-3 rounded-md border ${isDark ? 'bg-[#0A0C0F] border-[#1C2027]' : 'bg-[#F5F6F8] border-[#D9DDE3]'}`}>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className={`font-display font-bold uppercase tracking-wide text-[12px] flex items-center gap-2 ${t.text}`}>
+              {batch.done ? <Check className="w-3.5 h-3.5 text-[#34D399]" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {batch.done ? 'Batch done' : `Batch ${Math.min(batch.index + 1, batch.items.length)} of ${batch.items.length}`}
+              {!batch.done && batch.items[batch.index] && (
+                <span className={`font-mono normal-case tracking-normal font-normal truncate ${t.textMuted}`}>
+                  — {batch.items[batch.index].title} · {batchPhaseLabel[batch.phase] || batch.phase}
+                </span>
+              )}
+            </div>
+            <button type="button" onClick={onCancelBatch} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md font-mono text-[11px] ${t.button}`}>
+              {batch.done ? <X className="w-3 h-3" /> : <Square className="w-3 h-3" />} {batch.done ? 'close' : 'stop'}
+            </button>
+          </div>
+          <div className={`h-1 rounded-full overflow-hidden mb-2 ${isDark ? 'bg-[#14171C]' : 'bg-[#E1E5EA]'}`}>
+            <div className="h-full transition-all duration-300 bg-spectrum" style={{ width: `${(100 * (batch.done ? batch.items.length : batch.index)) / batch.items.length}%` }} />
+          </div>
+          <ul className="space-y-0.5 max-h-40 overflow-y-auto">
+            {batch.items.map((item, i) => {
+              const entry = batch.log[i];
+              const state = entry?.status || (i === batch.index && !batch.done ? 'running' : 'pending');
+              return (
+                <li key={item.url} className={`flex items-center gap-2 font-mono text-[11px] ${state === 'pending' ? t.textDimmed : t.textMuted}`}>
+                  {state === 'done' ? <Check className="w-3 h-3 text-[#34D399] flex-shrink-0" />
+                    : state === 'error' ? <AlertTriangle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                    : state === 'running' ? <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+                    : <span className="w-3 h-3 flex-shrink-0 text-center">·</span>}
+                  <span className="truncate">{item.artist ? `${item.artist} — ` : ''}{item.title}</span>
+                  {entry?.error && <span className="truncate text-red-500">{entry.error}</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {/* Job progress */}
-      {job && (
+      {job && !batch && (
         <div className="mt-3">
           <div className={`flex items-center justify-between text-xs mb-1.5 ${t.textMuted}`}>
             <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> {phaseLabel[job.phase] || 'Working…'}</span>
@@ -233,16 +307,51 @@ npm run helper:install`}
 
       {error && <p role="alert" className="mt-3 text-sm text-red-500">{error}</p>}
 
+      {/* Playlist batch bar */}
+      {results.length > 0 && !grabbingUrl && fromPlaylist && onBatch && (
+        <div className={`mt-3 flex flex-wrap items-center gap-3 px-3 py-2 rounded-md border ${isDark ? 'bg-[#0A0C0F] border-[#1C2027]' : 'bg-[#F5F6F8] border-[#D9DDE3]'}`}>
+          <ListMusic className={`w-4 h-4 ${t.textMuted}`} />
+          <span className={`font-mono text-[12px] ${t.textMuted}`}>
+            {results.length} tracks · {selected.size} selected · ~{selected.size * 55} MB of storage
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelected(selected.size === results.length ? new Set() : new Set(results.map(r => r.url)))}
+            className={`font-mono text-[11px] underline ${t.textMuted}`}
+          >
+            {selected.size === results.length ? 'none' : 'all'}
+          </button>
+          <button
+            type="button"
+            onClick={startBatch}
+            disabled={disabled || selected.size === 0 || !!batch}
+            className={`ml-auto flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold disabled:opacity-50 ${isDark ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'}`}
+            title="Download each track, separate the vocal and keep it in the Vault — one after another"
+          >
+            <Mic className="w-4 h-4" /> Grab vocals from {selected.size}
+          </button>
+        </div>
+      )}
+
       {/* Results */}
       {results.length > 0 && !grabbingUrl && (
         <ul className="mt-3 space-y-1.5 max-h-80 overflow-y-auto" aria-label="Search results">
           {results.map((r) => (
-            <li key={r.url}>
+            <li key={r.url} className="flex items-center gap-2">
+              {fromPlaylist && onBatch && !r.isPlaylist && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(r.url)}
+                  onChange={() => toggleSelected(r.url)}
+                  aria-label={`Include ${r.title} in the batch`}
+                  className="ml-2 accent-[#FACC15]"
+                />
+              )}
               <button
                 type="button"
                 onClick={() => handleGrab(r)}
                 disabled={r.isPlaylist}
-                className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors disabled:opacity-60 ${isDark ? 'hover:bg-[#14171C]' : 'hover:bg-[#F5F6F8]'}`}
+                className={`flex-1 min-w-0 flex items-center gap-3 p-2 rounded-md text-left transition-colors disabled:opacity-60 ${isDark ? 'hover:bg-[#14171C]' : 'hover:bg-[#F5F6F8]'}`}
               >
                 <div className={`w-12 h-12 rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center border ${isDark ? 'bg-[#14171C] border-[#1C2027]' : 'bg-[#EDEFF3] border-[#D9DDE3]'}`}>
                   {r.thumbnail ? (

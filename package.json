@@ -16,7 +16,9 @@
     "dev:api": "node scripts/dev-api.mjs",
     "dev:full": "concurrently -n vite,api,helper -c cyan,yellow,magenta \"vite --port 5173\" \"node scripts/dev-api.mjs\" \"node helper/remix-helper.mjs\"",
     "helper": "node helper/remix-helper.mjs",
-    "helper:install": "bash helper/install-launchagent.sh"
+    "helper:install": "bash helper/install-launchagent.sh",
+    "menubar": "python3 -c \"import rumps\" 2>/dev/null && python3 helper/menubar/remix_menubar.py || echo \"rumps not installed - run npm run menubar:install (installs it in a venv) or pip install rumps\"",
+    "menubar:install": "bash helper/menubar/install.sh"
   },
   "dependencies": {
     "@sentry/react": "^10.38.0",
