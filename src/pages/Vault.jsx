@@ -1,14 +1,14 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator } from 'lucide-react';
+import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useVault, usePageTitle } from '../hooks';
+import { useVault, usePageTitle, useHelper } from '../hooks';
 import { useToast } from '../components/ui/Toast';
 import { LabSignIn } from '../components/auth';
 import { getStemLabel, displayKeyName } from '../utils/stemFiles';
 import { stemColor } from '../utils/spectrum';
 import { compatibleCamelot, tempoCompatible } from '../lib/vault';
-import { downloadRemixPackFromUrls, downloadStemFromUrl } from '../utils/remixPack';
+import { downloadRemixPackFromUrls, downloadStemFromUrl, saveStemsToLive } from '../utils/remixPack';
 import { formatDuration } from '../lib/helper';
 
 const BLOB_LIMIT_BYTES = 1024 * 1024 * 1024; // Vercel Hobby
@@ -31,7 +31,7 @@ function Chip({ children, color, theme, title }) {
   );
 }
 
-function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onPack, onStem, busy }) {
+function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onPack, onSaveToLive, onStem, busy }) {
   const isDark = theme === 'dark';
   const stems = STEM_ORDER.filter(k => track.stems?.[k]?.url);
   const keyName = track.key ? `${displayKeyName(track.key)} ${track.key.mode === 'minor' ? 'min' : 'maj'}` : null;
@@ -116,6 +116,18 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
             <span className="hidden sm:inline">pack</span>
           </button>
         )}
+        {stems.length > 0 && onSaveToLive && (
+          <button
+            type="button"
+            onClick={() => onSaveToLive(track)}
+            disabled={!!busy}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-mono text-[12px] disabled:opacity-50 ${t.button}`}
+            title="Write the stems into ~/Music/Remix Lab/Stems/ (Live's browser)"
+          >
+            {busy === `live:${track.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderInput className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">to live</span>
+          </button>
+        )}
         <Link
           to={`/calc?track=${encodeURIComponent(track.id)}`}
           className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
@@ -161,6 +173,7 @@ export function Vault({ theme, t }) {
   usePageTitle('Vault');
   const { isSignedIn } = useAuth();
   const vault = useVault();
+  const helper = useHelper();
   const toast = useToast();
   const isDark = theme === 'dark';
 
@@ -211,6 +224,19 @@ export function Vault({ theme, t }) {
       const urls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]));
       await downloadRemixPackFromUrls(urls, trackMeta(track), track.mode || 'stems4');
       toast.success('Remix Pack downloaded');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }, [toast]);
+
+  const handleSaveToLive = useCallback(async (track) => {
+    setBusy(`live:${track.id}`);
+    try {
+      const urls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]));
+      const result = await saveStemsToLive(urls, trackMeta(track), track.mode || 'stems4');
+      toast.success(`${result.files.length - 1} stems saved to Remix Lab › Stems › ${result.dir.split('/').pop()}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -381,6 +407,7 @@ export function Vault({ theme, t }) {
                   onSetReference={setReference}
                   onRemove={handleRemove}
                   onPack={handlePack}
+                  onSaveToLive={helper.online ? handleSaveToLive : null}
                   onStem={handleStem}
                   busy={busy}
                 />

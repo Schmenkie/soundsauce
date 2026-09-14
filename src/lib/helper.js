@@ -65,6 +65,19 @@ export function helperJob(id) {
   return request(`/jobs/${id}`);
 }
 
+/**
+ * Ask the helper to download stems into ~/Music/Remix Lab/Stems/<folder>/ (Live's browser).
+ * @param {{ folder: string, files: {name:string,url:string}[], notes?: string }} payload
+ * @returns {Promise<{ dir: string, files: string[] }>}
+ */
+export function helperSaveStems(payload) {
+  return request('/stems', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }, 180000);
+}
+
 export function helperFileUrl(id) {
   return `${getHelperUrl()}/files/${id}`;
 }

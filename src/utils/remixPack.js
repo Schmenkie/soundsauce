@@ -1,5 +1,6 @@
 import { zipSync, strToU8 } from 'fflate';
-import { buildStemFilename, buildPackFilename, buildPackNotes } from './stemFiles';
+import { buildStemFilename, buildPackFilename, buildPackNotes, buildPackFolderName } from './stemFiles';
+import { helperSaveStems } from '../lib/helper';
 
 const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4' };
 
@@ -68,6 +69,21 @@ export async function downloadRemixPackFromUrls(stemUrls, meta, mode, onProgress
     onProgress?.(done, types.length);
   }
   saveBlob(buildRemixPackBlob(stems, meta, mode), buildPackFilename(meta));
+}
+
+/**
+ * Send the stems to the local helper, which writes them into ~/Music/Remix Lab/Stems/
+ * <Artist - Title>/ with stamped names + notes.txt — i.e. straight into Live's browser.
+ * @param {Record<string, string>} stemUrls - keyed by stem type (Blob or Replicate URLs)
+ * @returns {Promise<{ dir: string, files: string[] }>}
+ */
+export function saveStemsToLive(stemUrls, meta, mode) {
+  const types = Object.keys(stemUrls).filter(k => stemUrls[k]);
+  return helperSaveStems({
+    folder: buildPackFolderName(meta),
+    files: types.map(type => ({ name: buildStemFilename(meta, type, mode, extFromUrl(stemUrls[type])), url: stemUrls[type] })),
+    notes: buildPackNotes(meta, types, mode),
+  });
 }
 
 /** Fetch one stem URL and save it with a stamped filename. */

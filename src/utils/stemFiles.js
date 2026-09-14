@@ -106,12 +106,16 @@ export function buildStemFilename(meta, stemType, mode, ext = 'flac') {
   return `${parts.join(' - ')}.${ext}`;
 }
 
-/** Filename for the Remix Pack zip. */
-export function buildPackFilename(meta) {
+/** "Artist - Title" — the folder a track's stems live in under ~/Music/Remix Lab/Stems/ */
+export function buildPackFolderName(meta) {
   const artist = sanitizeForFilename(meta?.artist);
   const title = sanitizeForFilename(meta?.title) || 'Untitled';
-  const base = artist && !/^unknown artist$/i.test(artist) ? `${artist} - ${title}` : title;
-  return `${base} - Remix Pack.zip`;
+  return artist && !/^unknown artist$/i.test(artist) ? `${artist} - ${title}` : title;
+}
+
+/** Filename for the Remix Pack zip. */
+export function buildPackFilename(meta) {
+  return `${buildPackFolderName(meta)} - Remix Pack.zip`;
 }
 
 /**

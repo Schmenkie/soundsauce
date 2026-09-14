@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Play, Pause, Download, Loader2, Scissors, X, Check, Mic, Disc, Activity, Piano,
-  Music, Sparkles, Guitar, Layers, Cloud, CloudOff, Package, RotateCcw
+  Music, Sparkles, Guitar, Layers, Cloud, CloudOff, Package, RotateCcw, FolderInput
 } from 'lucide-react';
 import { trackStemSelected } from '../../lib/posthog';
 import { SEPARATION_MODES, getStemLabel } from '../../utils/stemFiles';
@@ -317,6 +317,7 @@ export function StemSelector({
   onPlayStem,
   onDownloadStem, // callback(stemType) — stamped single-file download
   onDownloadPack, // callback() — zip of all stems + notes.txt
+  onSaveToLive, // callback() — helper writes stems into ~/Music/Remix Lab/Stems/ (null when helper offline)
   onKeepStem, // callback(stemType) — re-host on permanent storage
   onKeepAll,
   onCancel,
@@ -333,6 +334,7 @@ export function StemSelector({
   const [pickedMode, setPickedMode] = useState('vocals');
   const [quality, setQuality] = useState('best');
   const [isPacking, setIsPacking] = useState(false);
+  const [isSavingToLive, setIsSavingToLive] = useState(false);
 
   const isProcessing = separationStatus === 'uploading' || separationStatus === 'processing';
   const isExpired = separationStatus === 'expired';
@@ -352,6 +354,16 @@ export function StemSelector({
       await onDownloadPack();
     } finally {
       setIsPacking(false);
+    }
+  };
+
+  const handleSaveToLive = async () => {
+    if (!onSaveToLive || isSavingToLive) return;
+    setIsSavingToLive(true);
+    try {
+      await onSaveToLive();
+    } finally {
+      setIsSavingToLive(false);
     }
   };
 
@@ -531,6 +543,18 @@ export function StemSelector({
             >
               {anySaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
               <span className="hidden sm:inline">Keep all</span>
+            </button>
+          )}
+
+          {!isExpired && onSaveToLive && (
+            <button
+              onClick={handleSaveToLive}
+              disabled={isSavingToLive}
+              className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 rounded-md disabled:opacity-50 ${t.button}`}
+              title="Write the stems + notes.txt into ~/Music/Remix Lab/Stems/ so they show up in Live's browser"
+            >
+              {isSavingToLive ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderInput className="w-4 h-4" />}
+              <span>{isSavingToLive ? 'Saving…' : 'To Live'}</span>
             </button>
           )}
 

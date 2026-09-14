@@ -17,9 +17,12 @@
  *   GET  /jobs/:id          -> { status, phase, progress, result?, error? }
  *   GET  /files/:id         -> the FLAC (audio/flac)
  *   GET  /files/:id/thumb   -> cover art (image/jpeg)
+ *   POST /stems {folder, files:[{name,url}], notes}
+ *                           -> { dir, files }     download stems into ~/Music/Remix Lab/Stems/<folder>/
  *
- * Finished files are also copied to ~/Music/Remix Lab/Sources/ so they show up in
- * Live's browser if you add that folder to Places.
+ * Finished files are also copied to ~/Music/Remix Lab/Sources/ (and stems land in
+ * ~/Music/Remix Lab/Stems/) so they show up in Live's browser once ~/Music/Remix Lab
+ * is added to Places.
  */
 
 import http from 'node:http';
@@ -34,6 +37,7 @@ const PORT = Number(process.env.REMIX_HELPER_PORT) || 7331;
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const SOURCES_DIR = process.env.REMIX_SOURCES_DIR || path.join(os.homedir(), 'Music', 'Remix Lab', 'Sources');
+const STEMS_DIR = process.env.REMIX_STEMS_DIR || path.join(os.homedir(), 'Music', 'Remix Lab', 'Stems');
 const WORK_DIR = path.join(os.tmpdir(), 'remix-lab-helper');
 const JOB_TTL_MS = 60 * 60 * 1000; // scrub temp files after an hour
 const SEARCH_LIMIT = 5;
@@ -48,6 +52,7 @@ const ALLOWED_ORIGINS = new Set([
 
 fs.mkdirSync(WORK_DIR, { recursive: true });
 fs.mkdirSync(SOURCES_DIR, { recursive: true });
+fs.mkdirSync(STEMS_DIR, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // utils
@@ -400,7 +405,48 @@ async function health() {
   let ffmpeg = false;
   try { ytdlp = (await run(YTDLP, ['--version'], { timeoutMs: 10000 })).stdout.trim(); } catch { /* not installed */ }
   try { await run(FFMPEG, ['-version'], { timeoutMs: 10000 }); ffmpeg = true; } catch { /* not installed */ }
-  return { ok: !!ytdlp && ffmpeg, version: VERSION, ytdlp, ffmpeg, sourcesDir: SOURCES_DIR };
+  return { ok: !!ytdlp && ffmpeg, version: VERSION, ytdlp, ffmpeg, sourcesDir: SOURCES_DIR, stemsDir: STEMS_DIR };
+}
+
+// ---------------------------------------------------------------------------
+// stems -> Live's browser
+// ---------------------------------------------------------------------------
+
+const STEM_HOSTS = /(^|\.)(public\.blob\.vercel-storage\.com|replicate\.delivery)$/;
+
+/**
+ * Download a set of stem URLs (Vercel Blob or Replicate CDN) into
+ * ~/Music/Remix Lab/Stems/<folder>/ with the stamped filenames the Lab chose, plus
+ * notes.txt. Same content as the Remix Pack zip, minus the zip and the Downloads folder.
+ */
+async function saveStems({ folder, files, notes }) {
+  const dirName = sanitizeForFilename(folder).trim() || 'Untitled';
+  const dir = path.join(STEMS_DIR, dirName);
+  fs.mkdirSync(dir, { recursive: true });
+  const written = [];
+  for (const f of files) {
+    const name = sanitizeForFilename(f.name).trim();
+    let host;
+    try { host = new URL(f.url).hostname; } catch { host = ''; }
+    if (!name || !STEM_HOSTS.test(host)) throw new Error(`Refusing to fetch ${f.url}`);
+    const res = await fetch(f.url);
+    if (!res.ok) {
+      const err = new Error(res.status === 403 || res.status === 404
+        ? `${name}: stem has expired — re-separate the track`
+        : `${name}: download failed (${res.status})`);
+      throw err;
+    }
+    const tmp = path.join(dir, `.${name}.part`);
+    await fs.promises.writeFile(tmp, Buffer.from(await res.arrayBuffer()));
+    fs.renameSync(tmp, path.join(dir, name));
+    written.push(name);
+    log(`stem saved: ${dirName}/${name}`);
+  }
+  if (notes) {
+    fs.writeFileSync(path.join(dir, 'notes.txt'), notes);
+    written.push('notes.txt');
+  }
+  return { dir, files: written };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -427,6 +473,14 @@ const server = http.createServer(async (req, res) => {
       if (!target || !isUrl(target)) return json(res, 400, { error: 'A YouTube or SoundCloud URL is required' });
       const job = startJob(target);
       return json(res, 202, { id: job.id });
+    }
+
+    if (req.method === 'POST' && p === '/stems') {
+      const body = await readBody(req);
+      if (!body.folder || !Array.isArray(body.files) || body.files.length === 0) {
+        return json(res, 400, { error: 'folder and files[] required' });
+      }
+      return json(res, 200, await saveStems(body));
     }
 
     let m = p.match(/^\/jobs\/([0-9a-f-]{36})$/);
@@ -465,5 +519,6 @@ server.listen(PORT, '127.0.0.1', async () => {
   log(`Remix Lab helper v${VERSION} on http://localhost:${PORT}`);
   log(`yt-dlp: ${h.ytdlp || 'MISSING'} · ffmpeg: ${h.ffmpeg ? 'ok' : 'MISSING'}`);
   log(`sources folder: ${SOURCES_DIR}`);
+  log(`stems folder:   ${STEMS_DIR}`);
   if (!h.ok) log('Install prerequisites: brew install yt-dlp ffmpeg');
 });
