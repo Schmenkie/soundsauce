@@ -2,7 +2,7 @@
  * Generate instrument-specific synthesis recommendations based on audio features.
  * @param {string} instrument - The detected or selected instrument type
  * @param {Object|null} features - Audio features from analysis
- * @param {string|null} dawPreference - User's DAW preference (e.g. 'FL Studio', 'Ableton Live')
+ * @param {string|null} dawPreference - DAW name (only 'Ableton Live' is known)
  * @returns {Object} Recommendations object with various synthesis settings
  */
 export function generateInstrumentRecommendations(instrument, features = null, dawPreference = null) {
@@ -126,67 +126,31 @@ export function generateInstrumentRecommendations(instrument, features = null, d
   // Native DAW instrument recommendations per instrument type
   const dawInstrumentMap = {
     kick: {
-      'FL Studio': 'FL Studio: 3xOsc or Kick 2 plugin',
       'Ableton Live': 'Ableton: Operator with pitch envelope',
-      'Logic Pro': 'Logic Pro: ES2 sine with pitch drop',
-      'Reaper': 'Reaper: ReaSynth (sine + pitch env) or Vital',
-      'Pro Tools': 'Pro Tools: Boom or Xpand!2 drum kit',
     },
     bass: {
-      'FL Studio': 'FL Studio: 3xOsc layered',
       'Ableton Live': 'Ableton: Wavetable with sub osc',
-      'Logic Pro': 'Logic Pro: ES2 with sub',
-      'Reaper': 'Reaper: Vital (layered sub + mid)',
-      'Pro Tools': 'Pro Tools: Vacuum analog modeling',
     },
     lead: {
-      'FL Studio': 'FL Studio: Sytrus or Harmor',
       'Ableton Live': 'Ableton: Wavetable with unison',
-      'Logic Pro': 'Logic Pro: ES2 or Retro Synth',
-      'Reaper': 'Reaper: Vital with unison voices',
-      'Pro Tools': 'Pro Tools: Vacuum or Xpand!2',
     },
     pad: {
-      'FL Studio': 'FL Studio: Harmless or Sytrus',
       'Ableton Live': 'Ableton: Wavetable',
-      'Logic Pro': 'Logic Pro: Alchemy',
-      'Reaper': 'Reaper: Vital with slow attack',
-      'Pro Tools': 'Pro Tools: Xpand!2 pads or Vacuum',
     },
     pluck: {
-      'FL Studio': 'FL Studio: 3xOsc or Sytrus',
       'Ableton Live': 'Ableton: Analog',
-      'Logic Pro': 'Logic Pro: ES2',
-      'Reaper': 'Reaper: Vital with fast envelope',
-      'Pro Tools': 'Pro Tools: Vacuum or Xpand!2',
     },
     guitar: {
-      'FL Studio': 'FL Studio: Sytrus or Harmless (subtractive approximation)',
       'Ableton Live': 'Ableton: Drift or Analog (plucky clean tone)',
-      'Logic Pro': 'Logic Pro: Retro Synth or Alchemy',
-      'Reaper': 'Reaper: Vital with saw/triangle blend',
-      'Pro Tools': 'Pro Tools: Vacuum or Xpand!2 Guitar presets',
     },
     brass: {
-      'FL Studio': 'FL Studio: Sytrus (FM brass) or 3xOsc (saw + filter env)',
       'Ableton Live': 'Ableton: Analog (saw + filter envelope)',
-      'Logic Pro': 'Logic Pro: ES2 (saw with filter envelope)',
-      'Reaper': 'Reaper: Vital (saw + filter envelope for attack)',
-      'Pro Tools': 'Pro Tools: Xpand!2 Brass or Vacuum',
     },
     woodwind: {
-      'FL Studio': 'FL Studio: Sytrus (sine + noise layer)',
       'Ableton Live': 'Ableton: Wavetable or Simpler with samples',
-      'Logic Pro': 'Logic Pro: Alchemy (resynthesis or granular)',
-      'Reaper': 'Reaper: Vital (sine + noise for breathiness)',
-      'Pro Tools': 'Pro Tools: Xpand!2 Woodwind presets',
     },
     strings: {
-      'FL Studio': 'FL Studio: Harmless or Sytrus (unison saws)',
       'Ableton Live': 'Ableton: Wavetable with unison and slow attack',
-      'Logic Pro': 'Logic Pro: Alchemy (string patches)',
-      'Reaper': 'Reaper: Vital with unison saws, slow attack',
-      'Pro Tools': 'Pro Tools: Xpand!2 String presets',
     },
   };
 

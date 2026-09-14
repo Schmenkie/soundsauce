@@ -1,20 +1,248 @@
 /**
- * Multi-DAW Plugin Recommendation System
+ * Ableton Live plugin recommendations for the "recreate it" recipe.
  *
- * Provides plugin profiles and sound-type mappings for:
- * - Ableton Live, Logic Pro, Reaper, Pro Tools
- * (FL Studio handled by existing flStudioPlugins.js)
- *
- * Reuses detectSoundType() and PARAMETER_TRANSLATIONS from flStudioPlugins.js
- * to avoid duplicating DAW-independent analysis logic.
+ * Spencer is on Live 12 Standard, so this is the only DAW the Lab knows. It carries the
+ * DAW-independent pieces too: detectSoundType() (analysis features → sound type) and
+ * PARAMETER_TRANSLATIONS (analysis numbers → knob positions).
  */
 
-import {
-  detectSoundType,
-  PARAMETER_TRANSLATIONS,
-  getFLStudioRecipe,
-  FL_PLUGIN_PROFILES
-} from './flStudioPlugins';
+// =============================================================================
+// Sound type detection + parameter translation (DAW-independent)
+// =============================================================================
+
+/**
+ * Translates analysis values to plugin-specific settings.
+ * Converts technical numbers into human-readable knob positions.
+ */
+export const PARAMETER_TRANSLATIONS = {
+  /**
+   * Convert brightness (0-1) to filter cutoff recommendation
+   */
+  brightnessToFilterCutoff: (brightness) => {
+    if (brightness > 0.7) {
+      return {
+        value: '80-100%',
+        explanation: 'Your sound is bright - keep the filter open or use high-pass only',
+        knobPosition: 'Almost fully clockwise'
+      };
+    } else if (brightness > 0.4) {
+      return {
+        value: '50-70%',
+        explanation: 'Balanced brightness - set filter to mid position',
+        knobPosition: 'Around 12 o\'clock to 2 o\'clock'
+      };
+    } else {
+      return {
+        value: '20-40%',
+        explanation: 'Dark/warm sound - close the filter more',
+        knobPosition: 'Around 9 o\'clock to 11 o\'clock'
+      };
+    }
+  },
+
+  /**
+   * Convert attack time (ms) to envelope recommendation
+   */
+  attackTimeToEnvelope: (attackMs) => {
+    if (attackMs < 10) {
+      return {
+        value: '0-5ms',
+        explanation: 'Instant/punchy attack - turn attack all the way down',
+        knobPosition: 'Fully counter-clockwise'
+      };
+    } else if (attackMs < 50) {
+      return {
+        value: '10-50ms',
+        explanation: 'Quick attack with slight softness',
+        knobPosition: 'Just off minimum'
+      };
+    } else if (attackMs < 200) {
+      return {
+        value: '50-200ms',
+        explanation: 'Softer attack - good for pads and smooth sounds',
+        knobPosition: 'Around 9-10 o\'clock'
+      };
+    } else {
+      return {
+        value: '200ms+',
+        explanation: 'Slow fade-in attack - very pad-like',
+        knobPosition: 'Around 11-12 o\'clock or higher'
+      };
+    }
+  },
+
+  /**
+   * Convert harmonicity (0-1) to oscillator/synthesis recommendation
+   */
+  harmonicityToOscillator: (harmonicity) => {
+    if (harmonicity > 0.7) {
+      return {
+        waveform: 'Saw or Square',
+        explanation: 'Tonal sound - use pitched oscillators',
+        synthType: 'subtractive'
+      };
+    } else if (harmonicity > 0.4) {
+      return {
+        waveform: 'Saw + Noise',
+        explanation: 'Semi-tonal - blend pitched wave with noise',
+        synthType: 'hybrid'
+      };
+    } else {
+      return {
+        waveform: 'Noise or FM',
+        explanation: 'Noisy/percussive - use noise or FM synthesis',
+        synthType: 'fm or noise'
+      };
+    }
+  },
+
+  /**
+   * Convert spectral centroid (Hz) to EQ/filter recommendation
+   */
+  spectralCentroidToFrequencyRange: (centroid) => {
+    if (centroid > 2000) {
+      return {
+        range: 'High-mid focused',
+        highPass: '100-150Hz',
+        lowPass: '12-16kHz',
+        explanation: 'Bright sound - will cut through the mix'
+      };
+    } else if (centroid > 500) {
+      return {
+        range: 'Mid focused',
+        highPass: '60-100Hz',
+        lowPass: '8-12kHz',
+        explanation: 'Balanced presence'
+      };
+    } else {
+      return {
+        range: 'Bass focused',
+        highPass: '20-40Hz',
+        lowPass: '4-8kHz',
+        explanation: 'Bass-heavy - needs room in low end'
+      };
+    }
+  },
+
+  /**
+   * Convert detected modulation to LFO settings
+   */
+  modulationToLFO: (modulation) => {
+    if (!modulation) return null;
+
+    const result = {
+      lfoSettings: []
+    };
+
+    if (modulation.hasTremolo) {
+      result.lfoSettings.push({
+        destination: 'Volume',
+        rate: modulation.lfoRate || '4Hz',
+        depth: modulation.tremoloDepth ? `${modulation.tremoloDepth}%` : '20-30%'
+      });
+    }
+
+    if (modulation.hasVibrato) {
+      result.lfoSettings.push({
+        destination: 'Pitch',
+        rate: modulation.lfoRate || '5Hz',
+        depth: modulation.vibratoDepth || '5-10 cents'
+      });
+    }
+
+    if (modulation.hasChorus) {
+      result.lfoSettings.push({
+        destination: 'Detune/Chorus',
+        explanation: 'Enable chorus effect or add unison detune'
+      });
+    }
+
+    return result;
+  }
+};
+
+/**
+ * Detect sound type from analysis features
+ * Returns the most likely sound type based on analysis
+ */
+export function detectSoundType(features, selectedInstrument = 'unknown') {
+  // If user selected a specific instrument, trust that
+  const instrumentToSoundType = {
+    'kick': 'kick',
+    'snare': 'drums',
+    'hihat': 'drums',
+    'drums': 'drums',
+    'bass': 'bass',
+    'sub-bass': 'sub-bass',
+    'sub': 'sub-bass',
+    'lead': 'lead',
+    'synth': 'lead',
+    'pad': 'pad',
+    'pluck': 'pluck',
+    'strings': 'strings',
+    'brass': 'brass',
+    'keys': 'bell',
+    'vocal': 'vocal',
+    'fx': 'fx',
+    'woodwind': 'lead',      // Woodwinds are melodic, treat like leads
+    'electronic': 'lead',    // Electronic genre - default to lead synth
+    'full': null             // Full mix - use auto-detection
+  };
+
+  if (selectedInstrument && instrumentToSoundType[selectedInstrument]) {
+    return instrumentToSoundType[selectedInstrument];
+  }
+
+  // Auto-detect from features
+  if (!features) return 'unknown';
+
+  const { brightness, harmonicity, spectralCentroid, adsr, attackTime } = features;
+  const attack = attackTime || adsr?.attack || 50;
+  const sustain = adsr?.sustain || 50;
+
+  // Sub-bass detection: low centroid, high harmonicity, low brightness
+  if (spectralCentroid < 200 && harmonicity > 0.6 && brightness < 0.3) {
+    return 'sub-bass';
+  }
+
+  // Bass detection: low-mid centroid, decent harmonicity
+  if (spectralCentroid < 500 && harmonicity > 0.4) {
+    return 'bass';
+  }
+
+  // Kick detection: very fast attack, low centroid, short decay
+  if (attack < 10 && spectralCentroid < 300 && adsr?.decay < 300) {
+    return 'kick';
+  }
+
+  // Pad detection: slow attack, high sustain
+  if (attack > 100 && sustain > 60) {
+    return 'pad';
+  }
+
+  // Pluck detection: fast attack, low sustain, quick decay
+  if (attack < 20 && sustain < 30 && adsr?.decay < 500) {
+    return 'pluck';
+  }
+
+  // Supersaw detection: high harmonicity, high brightness, mid-high centroid
+  // Supersaws have stacked detuned saws = very harmonic, very bright
+  if (harmonicity > 0.7 && brightness > 0.5 && spectralCentroid > 1000 && sustain > 40) {
+    return 'supersaw';
+  }
+
+  // Lead detection: mid-high centroid, fast attack, decent sustain
+  if (spectralCentroid > 800 && attack < 50 && sustain > 40) {
+    return 'lead';
+  }
+
+  // Bell detection: very low harmonicity (inharmonic)
+  if (harmonicity < 0.4 && attack < 20) {
+    return 'bell';
+  }
+
+  return 'unknown';
+}
 
 // =============================================================================
 // Ableton Live Plugin Profiles
@@ -127,235 +355,6 @@ const ABLETON_PLUGINS = {
   }
 };
 
-// =============================================================================
-// Logic Pro Plugin Profiles
-// =============================================================================
-
-const LOGIC_PLUGINS = {
-  'Alchemy': {
-    name: 'Alchemy',
-    fullName: 'Alchemy',
-    description: 'Logic\'s flagship synth. Combines wavetable, granular, additive, and spectral synthesis. Extremely powerful with a massive preset library.',
-    bestFor: ['pads', 'evolving-textures', 'modern-bass', 'leads', 'supersaws', 'ambient', 'complex-sounds'],
-    notIdealFor: ['quick-simple-sounds'],
-    difficulty: 3,
-    features: [
-      'Four sound sources (VA, wavetable, additive, spectral, granular)',
-      'Extensive modulation system',
-      'Built-in effects',
-      'Resynthesis from audio',
-      'Huge preset library',
-      'Performance controls'
-    ],
-    limitations: [
-      'Can be overwhelming for beginners',
-      'CPU intensive with complex patches'
-    ],
-    presetPath: 'Library > Patches > Instrument > Synthesizer > Alchemy'
-  },
-
-  'ES2': {
-    name: 'ES2',
-    fullName: 'ES2',
-    description: 'Powerful subtractive synth with three oscillators and extensive modulation. The workhorse synth of Logic Pro.',
-    bestFor: ['bass', 'leads', 'plucks', 'trance', 'classic-synths'],
-    notIdealFor: ['evolving-textures', 'wavetable-sounds', 'granular'],
-    difficulty: 3,
-    features: [
-      'Three oscillators with ring mod',
-      'Two multimode filters (serial/parallel)',
-      'Vector synthesis via triangle pad',
-      'Extensive modulation routing',
-      'Built-in effects'
-    ],
-    limitations: [
-      'Older interface design',
-      'No wavetable support'
-    ],
-    presetPath: 'Library > Patches > Instrument > Synthesizer > ES2'
-  },
-
-  'Retro Synth': {
-    name: 'Retro Synth',
-    fullName: 'Retro Synth',
-    description: 'Four synthesis engines in one: Analog, Sync, Wavetable, and FM. Simple interface, great for classic synth sounds.',
-    bestFor: ['vintage-synths', 'simple-leads', 'bass', 'pads', 'beginners'],
-    notIdealFor: ['complex-sound-design', 'modern-edm'],
-    difficulty: 2,
-    features: [
-      'Four modes: Analog, Sync, Wavetable, FM',
-      'Simple, visual interface',
-      'Built-in filter with envelope',
-      'LFO section',
-      'Easy to learn'
-    ],
-    limitations: [
-      'Less powerful than Alchemy or ES2',
-      'Basic modulation options'
-    ],
-    presetPath: 'Library > Patches > Instrument > Synthesizer > Retro Synth'
-  },
-
-  'EFM1': {
-    name: 'EFM1',
-    fullName: 'EFM1',
-    description: 'Simple FM synthesizer. Two operators (carrier + modulator) with easy-to-use interface. Perfect for FM basics.',
-    bestFor: ['bells', 'e-piano', 'fm-bass', 'metallic-sounds', 'learning-fm'],
-    notIdealFor: ['complex-fm', 'pads', 'evolving-sounds'],
-    difficulty: 2,
-    features: [
-      'Simple 2-operator FM',
-      'Modulation intensity control',
-      'Harmonic ratio tuning',
-      'Built-in sub oscillator',
-      'Quick and easy'
-    ],
-    limitations: [
-      'Only 2 operators (limited FM complexity)',
-      'Basic envelope controls'
-    ],
-    presetPath: 'Library > Patches > Instrument > Synthesizer > EFM1'
-  },
-
-  'Ultrabeat': {
-    name: 'Ultrabeat',
-    fullName: 'Ultrabeat',
-    description: 'Dedicated drum synthesizer and sampler. Combines synthesis and samples for creating drum sounds from scratch.',
-    bestFor: ['kick', 'drums', 'percussion', 'drum-synthesis'],
-    notIdealFor: ['melodic-sounds', 'pads', 'leads'],
-    difficulty: 3,
-    features: [
-      'Two oscillators (phase oscillator + FM/side chain/sample)',
-      'Ring modulation',
-      'Built-in sequencer',
-      'Noise generator',
-      'Sample import'
-    ],
-    limitations: [
-      'Drum-focused only',
-      'Dated interface'
-    ],
-    presetPath: 'Library > Patches > Instrument > Drums > Ultrabeat'
-  }
-};
-
-// =============================================================================
-// Reaper Plugin Profiles
-// =============================================================================
-
-const REAPER_PLUGINS = {
-  'ReaSynth': {
-    name: 'ReaSynth',
-    fullName: 'ReaSynth',
-    description: 'Reaper\'s built-in simple synthesizer. Very basic but useful for sub basses and test tones. For serious sound design, use Vital (free).',
-    bestFor: ['sub-bass', 'test-tones', 'simple-sounds'],
-    notIdealFor: ['complex-sounds', 'pads', 'leads', 'modern-sounds'],
-    difficulty: 1,
-    features: [
-      'Basic waveforms (sine, square, saw, triangle)',
-      'Simple volume envelope',
-      'Extremely lightweight'
-    ],
-    limitations: [
-      'Very limited features',
-      'No filter',
-      'No modulation',
-      'No effects'
-    ],
-    presetPath: 'FX > VST > ReaSynth'
-  },
-
-  'ReaSamplOmatic5000': {
-    name: 'ReaSamplOmatic5000',
-    fullName: 'ReaSamplOmatic5000',
-    description: 'Sample player built into Reaper. Load any audio file and play it chromatically. Good for one-shots and basic sampling.',
-    bestFor: ['sampling', 'drums', 'one-shots', 'realistic-instruments'],
-    notIdealFor: ['synthesis', 'sound-design'],
-    difficulty: 1,
-    features: [
-      'Load any audio file',
-      'Pitch shifting across keyboard',
-      'Loop modes',
-      'Basic envelope'
-    ],
-    limitations: [
-      'Sample-based only',
-      'No synthesis engine',
-      'Basic controls'
-    ],
-    presetPath: 'FX > VST > ReaSamplOmatic5000'
-  }
-};
-
-// =============================================================================
-// Pro Tools Plugin Profiles
-// =============================================================================
-
-const PRO_TOOLS_PLUGINS = {
-  'Vacuum': {
-    name: 'Vacuum',
-    fullName: 'Vacuum',
-    description: 'Analog modeling synth modeled after classic hardware. Warm sound with tube-style distortion. Good for vintage-style synthesis.',
-    bestFor: ['bass', 'warm-leads', 'vintage-synths', 'pads', 'acid-bass'],
-    notIdealFor: ['modern-edm', 'wavetable-sounds', 'complex-textures'],
-    difficulty: 2,
-    features: [
-      'Two VCO oscillators',
-      'VCF filter with resonance',
-      'Built-in distortion/tube modeling',
-      'LFO and envelope modulation',
-      'Vintage analog character'
-    ],
-    limitations: [
-      'Limited to classic analog synthesis',
-      'No wavetables or FM'
-    ],
-    presetPath: 'Inserts > Instrument > Vacuum'
-  },
-
-  'Xpand2': {
-    name: 'Xpand!2',
-    fullName: 'Xpand!2',
-    description: 'Multi-timbral workstation plugin. Huge preset library covering everything from pianos to synths. Great for quick, usable sounds.',
-    bestFor: ['quick-sounds', 'realistic-instruments', 'pianos', 'strings', 'pads', 'beginners'],
-    notIdealFor: ['deep-sound-design', 'unique-sounds', 'modern-bass'],
-    difficulty: 1,
-    features: [
-      'Four sound layers',
-      'Massive preset library',
-      'Easy macro controls',
-      'Built-in effects per layer',
-      'Good for layering'
-    ],
-    limitations: [
-      'Preset-focused (limited sound design)',
-      'Can\'t create sounds from scratch'
-    ],
-    presetPath: 'Inserts > Instrument > Xpand!2'
-  },
-
-  'Boom': {
-    name: 'Boom',
-    fullName: 'Boom',
-    description: 'Drum machine plugin with built-in patterns and sounds. Good for quick drum programming.',
-    bestFor: ['kick', 'drums', 'percussion', 'drum-patterns'],
-    notIdealFor: ['melodic-sounds', 'pads', 'leads', 'bass'],
-    difficulty: 1,
-    features: [
-      'Built-in drum sounds',
-      'Pattern sequencer',
-      'Mix controls per pad',
-      'Easy to use'
-    ],
-    limitations: [
-      'Drum-focused only',
-      'Limited sound design'
-    ],
-    presetPath: 'Inserts > Instrument > Boom'
-  }
-};
-
-// =============================================================================
 // Vital (Free) — used across all DAWs as alternative
 // =============================================================================
 
@@ -387,9 +386,6 @@ const VITAL_PROFILE = {
 
 export const DAW_PLUGIN_PROFILES = {
   'Ableton Live': ABLETON_PLUGINS,
-  'Logic Pro': LOGIC_PLUGINS,
-  'Reaper': REAPER_PLUGINS,
-  'Pro Tools': PRO_TOOLS_PLUGINS,
 };
 
 // =============================================================================
@@ -614,672 +610,22 @@ const ABLETON_SOUND_MAP = {
   }
 };
 
-const LOGIC_SOUND_MAP = {
-  'sub-bass': {
-    primary: 'Retro Synth',
-    alternatives: ['ES2'],
-    reasoning: 'Retro Synth in Analog mode produces a clean, solid sub bass with minimal fuss.',
-    quickStart: [
-      'Open Retro Synth (Analog mode)',
-      'Set Shape to Sine',
-      'Turn off second oscillator',
-      'Play in C0-C2 range',
-      'Optional: Add subtle Overdrive for warmth'
-    ]
-  },
-  'bass': {
-    primary: 'ES2',
-    alternatives: ['Alchemy', 'Retro Synth'],
-    reasoning: 'ES2\'s dual filters and three oscillators give you full control over bass sound design.',
-    quickStart: [
-      'Open ES2',
-      'OSC 1: Saw wave',
-      'OSC 2: Square wave (-1 octave for sub)',
-      'Mix with the triangle pad',
-      'Low-pass filter with moderate resonance',
-      'Adjust cutoff to taste'
-    ]
-  },
-  'reese-bass': {
-    primary: 'Alchemy',
-    alternatives: ['ES2'],
-    reasoning: 'Alchemy\'s unison and advanced modulation create massive reese basses with ease.',
-    quickStart: [
-      'Open Alchemy',
-      'Load a saw-based source',
-      'Enable Unison: 4-6 voices with detune',
-      'Add stereo spread',
-      'Low-pass filter around 1-2kHz',
-      'Add chorus for extra width'
-    ]
-  },
-  'lead': {
-    primary: 'Alchemy',
-    alternatives: ['ES2', 'Retro Synth'],
-    reasoning: 'Alchemy has the power and flexibility to create any lead sound, from classic to modern.',
-    quickStart: [
-      'Open Alchemy',
-      'Choose a bright source or wavetable',
-      'Add slight unison for width',
-      'Open filter for brightness',
-      'Short attack, medium sustain',
-      'Add delay and reverb'
-    ]
-  },
-  'supersaw': {
-    primary: 'Alchemy',
-    alternatives: ['Retro Synth'],
-    reasoning: 'Alchemy\'s unison engine with up to 16 voices creates massive supersaw stacks.',
-    quickStart: [
-      'Open Alchemy',
-      'Set Source A to a saw waveform',
-      'Unison: 7+ voices',
-      'Detune for width',
-      'Stereo spread high',
-      'Layer Source B an octave up or down',
-      'High-pass around 100Hz'
-    ]
-  },
-  'pluck': {
-    primary: 'Retro Synth',
-    alternatives: ['ES2', 'Alchemy'],
-    reasoning: 'Retro Synth\'s simple envelope makes quick pluck sounds easy. ES2 for more complex plucks.',
-    quickStart: [
-      'Open Retro Synth (Analog mode)',
-      'Saw or Square wave',
-      'Amp Env: Attack 0, Decay 100-300ms, Sustain 0%',
-      'Filter Env: positive amount, quick decay',
-      'This creates the bright-to-dark "pluck"'
-    ]
-  },
-  'pad': {
-    primary: 'Alchemy',
-    alternatives: ['Retro Synth', 'ES2'],
-    reasoning: 'Alchemy excels at lush, evolving pads with its multiple synthesis modes and modulation.',
-    quickStart: [
-      'Open Alchemy',
-      'Browse pad presets as starting points',
-      'Slow attack: 300-800ms',
-      'High sustain, long release (1-3s)',
-      'Add modulation for movement',
-      'Reverb for atmosphere'
-    ]
-  },
-  'evolving-pad': {
-    primary: 'Alchemy',
-    alternatives: ['ES2'],
-    reasoning: 'Alchemy\'s granular and spectral modes can create endlessly evolving textures.',
-    quickStart: [
-      'Open Alchemy',
-      'Try Granular or Spectral source mode',
-      'Modulate source position with slow LFO',
-      'Slow attack (500ms+), long release (2s+)',
-      'Heavy reverb and delay',
-      'Experiment with Transform pad'
-    ]
-  },
-  'kick': {
-    primary: 'Ultrabeat',
-    alternatives: ['Retro Synth'],
-    reasoning: 'Ultrabeat is Logic\'s dedicated drum synth — purpose-built for kick drums.',
-    quickStart: [
-      'Open Ultrabeat',
-      'Use the phase oscillator (sine wave)',
-      'Add pitch envelope: high to low sweep',
-      'Quick pitch decay (20-80ms)',
-      'Short amp decay (100-300ms)',
-      'Add distortion for punch'
-    ]
-  },
-  'drums': {
-    primary: 'Ultrabeat',
-    alternatives: ['Alchemy'],
-    reasoning: 'Ultrabeat combines synthesis and sampling for creating any drum sound.',
-    quickStart: [
-      'Open Ultrabeat',
-      'Browse drum presets or start from Init',
-      'Mix oscillator and noise for snares',
-      'Quick envelopes for punch',
-      'Use the built-in sequencer for patterns'
-    ]
-  },
-  'bell': {
-    primary: 'EFM1',
-    alternatives: ['Alchemy', 'ES2'],
-    reasoning: 'FM synthesis creates the best bell sounds. EFM1 is simple FM, Alchemy for more complex bells.',
-    quickStart: [
-      'Open EFM1',
-      'Set Harmonic ratio to 2, 3, or 7',
-      'Increase FM intensity gradually',
-      'Higher ratios = more metallic',
-      'Quick attack, medium-long decay, no sustain'
-    ]
-  },
-  'fm-sound': {
-    primary: 'EFM1',
-    alternatives: ['Alchemy'],
-    reasoning: 'EFM1 is Logic\'s dedicated FM synth. Simple interface but effective for FM basics.',
-    quickStart: [
-      'Open EFM1',
-      'Adjust the Harmonics knob for FM ratio',
-      'FM intensity controls the amount of modulation',
-      'More intensity = more complex/harsh timbre',
-      'Envelope on FM for movement',
-      'For complex FM, use Alchemy instead'
-    ]
-  },
-  'strings': {
-    primary: 'Alchemy',
-    alternatives: ['ES2', 'Retro Synth'],
-    reasoning: 'Alchemy has beautiful string patches and can create lush synth strings from scratch.',
-    quickStart: [
-      'Open Alchemy',
-      'Browse String presets',
-      'Or: Use VA source with slow attack',
-      'High sustain, long release',
-      'Add ensemble/chorus for width',
-      'EQ: tame harshness around 2-4kHz'
-    ]
-  },
-  'brass': {
-    primary: 'ES2',
-    alternatives: ['Alchemy', 'Retro Synth'],
-    reasoning: 'ES2\'s saw oscillators with filter envelope create classic synth brass sounds.',
-    quickStart: [
-      'Open ES2',
-      'Saw wave oscillator',
-      'Filter envelope with quick attack',
-      'The filter opens on each note for "brassy" quality',
-      'Medium attack (20-100ms)',
-      'Add subtle vibrato'
-    ]
-  },
-  'fx': {
-    primary: 'Alchemy',
-    alternatives: ['ES2'],
-    reasoning: 'Alchemy\'s spectral and granular modes are perfect for creating unique FX sounds.',
-    quickStart: [
-      'Open Alchemy',
-      'Try Spectral or Granular source mode',
-      'Extreme modulation for wild textures',
-      'LFO to pitch for risers',
-      'Add heavy effects',
-      'Experiment with the Transform pad'
-    ]
-  },
-  'vocal': {
-    primary: 'Alchemy',
-    alternatives: ['EFM1'],
-    reasoning: 'Alchemy can resynthesize vocal samples and has vocal-like presets built in.',
-    quickStart: [
-      'Open Alchemy',
-      'Browse Vocal presets',
-      'Or: Import a vocal sample as a source',
-      'Use Granular mode for vocal texture manipulation',
-      'Formant filters for vowel sounds'
-    ]
-  },
-  'unknown': {
-    primary: 'Alchemy',
-    alternatives: ['Retro Synth', 'ES2'],
-    reasoning: 'Alchemy is the most versatile Logic synth. Start with presets and tweak from there.',
-    quickStart: [
-      'Open Alchemy and browse presets',
-      'Find something close to your target',
-      'Tweak parameters to match',
-      'Or use Retro Synth for simpler sounds'
-    ]
-  }
-};
-
-const REAPER_SOUND_MAP = {
-  'sub-bass': {
-    primary: 'ReaSynth',
-    alternatives: ['Vital'],
-    reasoning: 'ReaSynth can produce a clean sine sub. For anything more complex, use Vital (free).',
-    quickStart: [
-      'Open ReaSynth',
-      'Set waveform to Sine',
-      'Play in C0-C2 range',
-      'For more control, use Vital instead',
-      'Vital: Set OSC 1 to Init (Sine), keep it simple'
-    ]
-  },
-  'bass': {
-    primary: 'Vital',
-    alternatives: ['ReaSynth'],
-    reasoning: 'Vital gives you full control over bass design with wavetables, filters, and modulation. ReaSynth is too basic for complex bass.',
-    quickStart: [
-      'Open Vital (free download at vital.audio)',
-      'Set OSC 1 to Basic Saw',
-      'Add sub by enabling OSC 2 as sine (-1 octave)',
-      'Low-pass filter with envelope',
-      'Adjust cutoff for brightness'
-    ]
-  },
-  'reese-bass': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s unison engine is essential for reese bass. ReaSynth can\'t do this.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Saw wavetable',
-      'Unison: 4-7 voices, Detune ~25%',
-      'Spread for stereo width',
-      'Low-pass filter around 1-2kHz',
-      'Add chorus effect'
-    ]
-  },
-  'lead': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital is your best option for leads in Reaper. Wavetable scanning, unison, and effects all built in.',
-    quickStart: [
-      'Open Vital',
-      'Choose a bright wavetable for OSC 1',
-      'Add slight unison (2-4 voices)',
-      'Open filter for brightness',
-      'Short attack, medium sustain',
-      'Use built-in reverb and delay'
-    ]
-  },
-  'supersaw': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s unison with up to 16 voices per oscillator creates massive supersaws.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Basic Saw wavetable',
-      'Unison voices: 7+',
-      'Unison detune: 15-25%',
-      'Spread: 80-100%',
-      'Layer OSC 2 an octave up or down',
-      'High-pass around 100Hz'
-    ]
-  },
-  'pluck': {
-    primary: 'Vital',
-    alternatives: ['ReaSynth'],
-    reasoning: 'Vital\'s envelopes and filter give you the control needed for pluck sounds.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Saw or Square wavetable',
-      'Amp Env: Attack 0, Decay 100-300ms, Sustain 0%',
-      'Filter with envelope: positive amount, quick decay',
-      'This creates the bright attack that fades'
-    ]
-  },
-  'pad': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s wavetable morphing and modulation matrix create beautiful pads.',
-    quickStart: [
-      'Open Vital',
-      'Choose a smooth wavetable',
-      'Slow attack: 300-800ms',
-      'High sustain, long release (1-3s)',
-      'Modulate wavetable position with LFO',
-      'Add reverb and chorus'
-    ]
-  },
-  'evolving-pad': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'LFO-controlled wavetable position in Vital creates constantly morphing textures.',
-    quickStart: [
-      'Open Vital',
-      'Use an evolving wavetable',
-      'Map LFO 1 to wavetable position (slow rate)',
-      'Slow attack, long release',
-      'Add multiple LFOs for complex movement',
-      'Heavy reverb for atmosphere'
-    ]
-  },
-  'kick': {
-    primary: 'Vital',
-    alternatives: ['ReaSynth'],
-    reasoning: 'Vital can create synth kicks with pitch envelope modulation. ReaSynth is too basic.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Sine (Init wavetable)',
-      'Map Envelope 2 to OSC pitch (+24 semitones)',
-      'Env 2: instant attack, fast decay (20-80ms)',
-      'Amp Env: short decay (100-300ms), no sustain',
-      'Add distortion for punch'
-    ]
-  },
-  'drums': {
-    primary: 'ReaSamplOmatic5000',
-    alternatives: ['Vital'],
-    reasoning: 'Load drum samples into ReaSamplOmatic5000 for quick drum sounds. Vital for synth drums.',
-    quickStart: [
-      'For samples: Open ReaSamplOmatic5000',
-      'Drag a drum sample onto it',
-      'Set to Note mode',
-      'For synth drums: Use Vital with noise + sine'
-    ]
-  },
-  'bell': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital can approximate FM-style bells using wavetable synthesis and modulation.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Sine wavetable',
-      'Use FM from OSC 2 or 3',
-      'Experiment with FM amount',
-      'Quick attack, medium-long decay, low sustain',
-      'Or try free Dexed plugin for true FM bells'
-    ]
-  },
-  'fm-sound': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital has FM between oscillators. For dedicated FM, try free Dexed (DX7 emulation).',
-    quickStart: [
-      'Open Vital',
-      'Enable FM from OSC 2 to OSC 1',
-      'Experiment with OSC 2 pitch ratio',
-      'Modulate FM amount with envelope for movement',
-      'Also try: Dexed (free DX7 emulation plugin)'
-    ]
-  },
-  'strings': {
-    primary: 'Vital',
-    alternatives: ['ReaSamplOmatic5000'],
-    reasoning: 'Vital for synth strings with unison. ReaSamplOmatic for real string samples.',
-    quickStart: [
-      'For synth strings: Open Vital',
-      'Saw or soft wavetable',
-      'Slow attack (200-500ms), long release',
-      'Add unison for ensemble width',
-      'For realistic: Load string samples in ReaSamplOmatic5000'
-    ]
-  },
-  'brass': {
-    primary: 'Vital',
-    alternatives: ['ReaSamplOmatic5000'],
-    reasoning: 'Vital\'s filter envelope can recreate the brassy attack character.',
-    quickStart: [
-      'Open Vital',
-      'Saw wave oscillator',
-      'Filter with envelope: opens on attack',
-      'Medium attack (20-100ms)',
-      'Add vibrato via LFO to pitch'
-    ]
-  },
-  'fx': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s modulation matrix and effects make it great for experimental FX in Reaper.',
-    quickStart: [
-      'Open Vital',
-      'Experiment with extreme modulation',
-      'Map LFOs to pitch for risers',
-      'Try random LFO shapes',
-      'Add heavy effects chain'
-    ]
-  },
-  'vocal': {
-    primary: 'ReaSamplOmatic5000',
-    alternatives: ['Vital'],
-    reasoning: 'Load a vocal sample into ReaSamplOmatic5000 to play it chromatically.',
-    quickStart: [
-      'Open ReaSamplOmatic5000',
-      'Drag a vocal sample in',
-      'Set pitch shifting range',
-      'Adjust envelope for smooth playback',
-      'Or use Vital with formant-style wavetables'
-    ]
-  },
-  'unknown': {
-    primary: 'Vital',
-    alternatives: ['ReaSynth', 'ReaSamplOmatic5000'],
-    reasoning: 'Vital is the most versatile free synth. Start with presets and tweak.',
-    quickStart: [
-      'Open Vital and browse presets',
-      'Find something close',
-      'Tweak from there',
-      'ReaSynth for simple sine/saw needs',
-      'ReaSamplOmatic5000 for sample-based sounds'
-    ]
-  }
-};
-
-const PRO_TOOLS_SOUND_MAP = {
-  'sub-bass': {
-    primary: 'Vacuum',
-    alternatives: ['Vital'],
-    reasoning: 'Vacuum\'s analog modeling gives warm sub bass. Vital for more precision.',
-    quickStart: [
-      'Open Vacuum',
-      'Set VCO 1 to Sine wave',
-      'Turn off VCO 2',
-      'Play in low octaves (C0-C2)',
-      'Add subtle tube drive for warmth',
-      'Or use Vital for more control'
-    ]
-  },
-  'bass': {
-    primary: 'Vacuum',
-    alternatives: ['Vital', 'Xpand2'],
-    reasoning: 'Vacuum\'s analog warmth and built-in distortion are great for bass sounds.',
-    quickStart: [
-      'Open Vacuum',
-      'VCO 1: Saw wave',
-      'VCO 2: Square (-1 octave for sub layer)',
-      'Adjust filter cutoff and resonance',
-      'Add drive for character',
-      'Short attack on amp envelope'
-    ]
-  },
-  'reese-bass': {
-    primary: 'Vital',
-    alternatives: ['Vacuum'],
-    reasoning: 'Vital\'s unison engine is essential for thick reese bass. Vacuum is too limited for this.',
-    quickStart: [
-      'Open Vital (free at vital.audio)',
-      'OSC 1: Saw wavetable',
-      'Unison: 4-7 voices, Detune ~25%',
-      'Spread for stereo width',
-      'Low-pass filter around 1-2kHz',
-      'Add chorus'
-    ]
-  },
-  'lead': {
-    primary: 'Vital',
-    alternatives: ['Vacuum', 'Xpand2'],
-    reasoning: 'Vital gives the most flexibility for modern lead sounds. Xpand!2 for quick presets.',
-    quickStart: [
-      'Open Vital',
-      'Choose a bright wavetable',
-      'Slight unison for width',
-      'Open filter for brightness',
-      'Short attack, medium sustain',
-      'Add reverb and delay'
-    ]
-  },
-  'supersaw': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s unison is the only way to get proper supersaws in Pro Tools stock plugins.',
-    quickStart: [
-      'Open Vital',
-      'OSC 1: Basic Saw wavetable',
-      'Unison voices: 7+',
-      'Detune: 15-25%',
-      'Spread: 80-100%',
-      'Layer OSC 2 an octave up/down'
-    ]
-  },
-  'pluck': {
-    primary: 'Vacuum',
-    alternatives: ['Vital', 'Xpand2'],
-    reasoning: 'Vacuum\'s quick envelopes and filter make snappy pluck sounds.',
-    quickStart: [
-      'Open Vacuum',
-      'VCO 1: Saw or Square',
-      'Quick amp decay (100-300ms), no sustain',
-      'Filter with envelope amount',
-      'Short filter decay for pluck character'
-    ]
-  },
-  'pad': {
-    primary: 'Vital',
-    alternatives: ['Xpand2', 'Vacuum'],
-    reasoning: 'Vital\'s wavetable morphing creates lush pads. Xpand!2 has good pad presets too.',
-    quickStart: [
-      'Open Vital',
-      'Smooth wavetable, slow attack',
-      'High sustain, long release',
-      'Modulate wavetable position with LFO',
-      'Add reverb and chorus',
-      'Or: Browse Xpand!2 pad presets'
-    ]
-  },
-  'evolving-pad': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s LFO-to-wavetable modulation creates constantly evolving textures.',
-    quickStart: [
-      'Open Vital',
-      'Choose an evolving wavetable',
-      'Map slow LFO to wavetable position',
-      'Long attack, long release',
-      'Multiple modulation sources for complexity',
-      'Heavy reverb'
-    ]
-  },
-  'kick': {
-    primary: 'Boom',
-    alternatives: ['Vital'],
-    reasoning: 'Boom has built-in kick drum sounds and synthesis. Vital for custom synth kicks.',
-    quickStart: [
-      'For quick kicks: Open Boom, browse kick presets',
-      'For custom: Open Vital',
-      'Sine oscillator with pitch envelope (+24 to 0 semitones)',
-      'Fast pitch decay (20-80ms)',
-      'Short amp decay, add distortion'
-    ]
-  },
-  'drums': {
-    primary: 'Boom',
-    alternatives: ['Xpand2', 'Vital'],
-    reasoning: 'Boom is Pro Tools\' dedicated drum machine. Xpand!2 also has drum presets.',
-    quickStart: [
-      'Open Boom',
-      'Browse drum presets',
-      'Tweak individual pad sounds',
-      'Use the pattern sequencer',
-      'Or: Browse Xpand!2 drum kits'
-    ]
-  },
-  'bell': {
-    primary: 'Vital',
-    alternatives: ['Xpand2'],
-    reasoning: 'Vital can do FM-style bells with its oscillator FM feature. Xpand!2 has bell presets.',
-    quickStart: [
-      'Open Vital',
-      'Enable FM from OSC 2 to OSC 1',
-      'Both set to Sine',
-      'OSC 2 ratio: 2, 3, or 7',
-      'Quick attack, medium-long decay',
-      'Or: Browse Xpand!2 bell presets'
-    ]
-  },
-  'fm-sound': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital has FM between oscillators. Pro Tools has no dedicated FM synth.',
-    quickStart: [
-      'Open Vital',
-      'Enable FM from OSC 2 to OSC 1',
-      'Experiment with OSC 2 pitch ratio',
-      'Modulate FM amount with envelope',
-      'Also try: Dexed (free DX7 emulation)'
-    ]
-  },
-  'strings': {
-    primary: 'Xpand2',
-    alternatives: ['Vital'],
-    reasoning: 'Xpand!2 has quality string presets. Vital for synth string pads.',
-    quickStart: [
-      'For realistic: Open Xpand!2, browse Strings category',
-      'For synth strings: Open Vital',
-      'Saw wavetable with slow attack',
-      'Add unison for ensemble width',
-      'Long release, gentle filter'
-    ]
-  },
-  'brass': {
-    primary: 'Xpand2',
-    alternatives: ['Vacuum', 'Vital'],
-    reasoning: 'Xpand!2 has realistic brass presets. Vacuum for synth brass with filter envelope.',
-    quickStart: [
-      'For realistic: Open Xpand!2, browse Brass category',
-      'For synth brass: Open Vacuum',
-      'Saw wave with filter envelope',
-      'Filter opens on attack for brassy quality',
-      'Medium attack, add vibrato'
-    ]
-  },
-  'fx': {
-    primary: 'Vital',
-    alternatives: [],
-    reasoning: 'Vital\'s modulation and effects are the best option for FX sounds in Pro Tools.',
-    quickStart: [
-      'Open Vital',
-      'Extreme modulation experiments',
-      'LFO to pitch for risers',
-      'Random modulation sources',
-      'Heavy effects chain'
-    ]
-  },
-  'vocal': {
-    primary: 'Xpand2',
-    alternatives: ['Vital'],
-    reasoning: 'Xpand!2 has vocal-style presets. Vital for formant-style synthesis.',
-    quickStart: [
-      'Open Xpand!2, browse Vocal presets',
-      'Or: Use Vital with formant wavetables',
-      'Choir-style patches available in Xpand!2',
-      'For real vocals: use audio tracks directly'
-    ]
-  },
-  'unknown': {
-    primary: 'Vital',
-    alternatives: ['Xpand2', 'Vacuum'],
-    reasoning: 'Vital is the most versatile option. Xpand!2 for quick presets.',
-    quickStart: [
-      'Start with Vital presets',
-      'Or browse Xpand!2 for quick sounds',
-      'Vacuum for warm analog-style sounds',
-      'Tweak from the closest preset'
-    ]
-  }
-};
-
 export const DAW_SOUND_TYPE_MAP = {
   'Ableton Live': ABLETON_SOUND_MAP,
-  'Logic Pro': LOGIC_SOUND_MAP,
-  'Reaper': REAPER_SOUND_MAP,
-  'Pro Tools': PRO_TOOLS_SOUND_MAP,
 };
 
 // =============================================================================
 // Supported DAWs list
 // =============================================================================
 
-const SUPPORTED_DAWS = ['FL Studio', 'Ableton Live', 'Logic Pro', 'Reaper', 'Pro Tools'];
+const SUPPORTED_DAWS = ['Ableton Live'];
 
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
 /**
- * Get a complete DAW-specific recipe for recreating a sound.
- * Delegates to getFLStudioRecipe for FL Studio, uses DAW_PLUGIN_PROFILES
- * and DAW_SOUND_TYPE_MAP for other supported DAWs.
+ * Get a complete Ableton Live recipe for recreating a sound.
  *
  * @param {Object} features - Audio analysis features
  * @param {string} selectedInstrument - Detected/selected instrument type
@@ -1288,11 +634,6 @@ const SUPPORTED_DAWS = ['FL Studio', 'Ableton Live', 'Logic Pro', 'Reaper', 'Pro
  */
 export function getDAWRecipe(features, selectedInstrument, dawPreference) {
   const daw = dawPreference || 'Ableton Live';
-
-  // FL Studio uses the existing detailed system
-  if (daw === 'FL Studio') {
-    return getFLStudioRecipe(features, selectedInstrument);
-  }
 
   // Unsupported DAWs get Vital-only generic recipe
   if (!SUPPORTED_DAWS.includes(daw)) {
@@ -1380,8 +721,7 @@ export function getDAWRecipe(features, selectedInstrument, dawPreference) {
  */
 function getVitalOnlyRecipe(features, selectedInstrument) {
   const soundType = detectSoundType(features, selectedInstrument);
-  // Reuse Reaper's sound map since it's already Vital-heavy
-  const soundMap = REAPER_SOUND_MAP[soundType] || REAPER_SOUND_MAP['unknown'];
+  const soundMap = ABLETON_SOUND_MAP[soundType] || ABLETON_SOUND_MAP['unknown'];
 
   return {
     soundType,
@@ -1442,14 +782,10 @@ function getSoundDescription(soundType) {
 }
 
 /**
- * Get the plugin profiles for a given DAW.
- * Returns FL_PLUGIN_PROFILES for FL Studio, DAW_PLUGIN_PROFILES[daw] for others.
+ * Get the plugin profiles for a DAW (only Ableton Live is known).
  */
 export function getPluginProfilesForDAW(dawPreference) {
-  if (!dawPreference || dawPreference === 'FL Studio') {
-    return FL_PLUGIN_PROFILES;
-  }
-  return DAW_PLUGIN_PROFILES[dawPreference] || {};
+  return DAW_PLUGIN_PROFILES[dawPreference || 'Ableton Live'] || ABLETON_PLUGINS;
 }
 
 /**
@@ -1462,7 +798,7 @@ export function isDAWSupported(dawPreference) {
 /**
  * Get 3-4 concise integration tips for using a Vital preset within a specific DAW.
  * These are short, actionable tips — not a full synthesis tutorial.
- * @param {string} daw - DAW name (e.g. 'FL Studio', 'Ableton Live')
+ * @param {string} daw - DAW name ('Ableton Live')
  * @param {string} soundType - Detected sound type (e.g. 'bass', 'lead', 'pad')
  * @returns {{ title: string, detail: string }[]}
  */
@@ -1471,11 +807,7 @@ export function getDAWIntegrationTips(daw, soundType) {
 
   // Tip 1: How to load the .vital preset in this DAW
   const loadInstructions = {
-    'FL Studio': 'Add Vital to a Channel Rack slot (Channel Rack → + → More plugins → Vital). Then drag and drop the .vital file onto the Vital window, or use Vital\'s preset browser (click the preset name at the top).',
     'Ableton Live': 'Drag Vital onto a MIDI track from Plug-ins in the Browser. Then drag the .vital file onto Vital\'s window, or use the preset browser inside Vital.',
-    'Logic Pro': 'Insert Vital on an Instrument track (Instrument slot → AU Instruments → Vital). Drag the .vital file onto Vital\'s window to load it.',
-    'Reaper': 'Add Vital to a track (FX → VST3: Vital). Drag the .vital file onto Vital\'s window to load it.',
-    'Pro Tools': 'Insert Vital on an Instrument track (Inserts → Instrument → Vital). Drag the .vital file onto Vital\'s window to load it.',
   };
   tips.push({
     title: `Load the preset in ${daw}`,
@@ -1484,14 +816,6 @@ export function getDAWIntegrationTips(daw, soundType) {
 
   // Tip 2: DAW-specific effects chain recommendation
   const effectsTips = {
-    'FL Studio': {
-      bass: 'Add Fruity Parametric EQ 2 after Vital in the mixer: high-pass at 30Hz to remove rumble, slight boost at 80-120Hz for punch. Add Fruity Soft Clipper for subtle warmth.',
-      lead: 'Add Fruity Delay 3 (1/8 dotted, ~20% mix) and Fruity Reeverb 2 (small room, ~15% mix) in the mixer insert chain.',
-      pad: 'Add Fruity Reeverb 2 (large hall, 40-60% mix, 3-5s decay) and Fruity Chorus (subtle, ~20% mix) in the mixer insert.',
-      pluck: 'Add Fruity Delay 3 (1/8, ~25% mix) for rhythmic echoes. Light compression with Fruity Limiter to tighten transients.',
-      kick: 'Add Fruity Soft Clipper for saturation and Fruity Limiter for peak control. High-pass other instruments at 100Hz to give the kick room.',
-      drums: 'Add Fruity Limiter for punch (fast attack, medium release). Use Fruity Parametric EQ 2 to carve space for each drum element.',
-    },
     'Ableton Live': {
       bass: 'Add EQ Eight after Vital: high-pass at 30Hz, boost at 80-120Hz. Add Saturator (Soft Sine) for subtle warmth.',
       lead: 'Add Simple Delay (1/8 dotted) and Reverb (small room, ~15% dry/wet) after Vital on the same track.',
@@ -1499,30 +823,6 @@ export function getDAWIntegrationTips(daw, soundType) {
       pluck: 'Add Ping Pong Delay (1/8) and a touch of Reverb. Use Compressor to tighten the attack.',
       kick: 'Add Saturator for analog warmth. Use Compressor with sidechain from the kick on bass tracks.',
       drums: 'Add Drum Buss for saturation and transient shaping. Use EQ Eight to carve frequency space.',
-    },
-    'Logic Pro': {
-      bass: 'Add Channel EQ: high-pass at 30Hz, boost at 80-120Hz. Add Overdrive (subtle) for harmonics.',
-      lead: 'Add Tape Delay (1/8 dotted) and ChromaVerb (small room). Use Channel EQ to add presence at 2-5kHz.',
-      pad: 'Add ChromaVerb (large hall, long decay) and Ensemble for subtle chorus. Automate the reverb mix for movement.',
-      pluck: 'Add Stereo Delay (1/8) and Space Designer (small room). Use Compressor to control dynamics.',
-      kick: 'Add Clip Distortion for punch. Use Compressor with fast attack to tame peaks.',
-      drums: 'Use Drum Machine Designer or add Compressor and Channel EQ per element.',
-    },
-    'Reaper': {
-      bass: 'Add ReaEQ: high-pass at 30Hz. For warmth, add a free saturation plugin like Analog Obsession CHANNEV.',
-      lead: 'Add ReaDelay (1/8 dotted, ~20% wet) and a reverb plugin. Vital\'s built-in FX can also handle this.',
-      pad: 'Add a reverb plugin (or use Vital\'s built-in reverb at 40-60% mix). Add ReaDelay for extra space.',
-      pluck: 'Add ReaDelay (1/8 note) and light compression with ReaComp.',
-      kick: 'Add ReaComp for punch. Use ReaEQ to boost the sub at 50-60Hz.',
-      drums: 'Add ReaComp and ReaEQ per drum element. Route to individual channels for mixing.',
-    },
-    'Pro Tools': {
-      bass: 'Add EQ III: high-pass at 30Hz, boost at 80-120Hz. Add Lo-Fi for subtle saturation.',
-      lead: 'Add Mod Delay III (1/8 dotted) and D-Verb (small room). Use EQ III for presence.',
-      pad: 'Add D-Verb (large hall, long decay). Add Air Chorus for width.',
-      pluck: 'Add Mod Delay III and light compression with Dyn3 Compressor.',
-      kick: 'Add Lo-Fi for saturation and Dyn3 Compressor for peak control.',
-      drums: 'Add Dyn3 Compressor and EQ III per element. Use auxiliary sends for shared reverb.',
     },
   };
 

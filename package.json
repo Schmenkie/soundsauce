@@ -21,18 +21,14 @@
     "menubar:install": "bash helper/menubar/install.sh"
   },
   "dependencies": {
-    "@sentry/react": "^10.38.0",
     "@tailwindcss/postcss": "^4.1.18",
     "@vercel/blob": "^2.0.1",
     "fflate": "^0.8.3",
     "lucide-react": "^1.16.0",
     "motion": "^12.36.0",
-    "posthog-js": "^1.345.2",
-    "posthog-node": "^5.34.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.13.0",
-    "web-vitals": "^5.1.0"
+    "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

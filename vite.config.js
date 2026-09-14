@@ -28,7 +28,6 @@ export default defineConfig({
           // Core React runtime — changes rarely, caches well
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           // PostHog analytics
-          'vendor-posthog': ['posthog-js'],
         },
       },
     },

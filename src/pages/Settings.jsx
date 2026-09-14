@@ -6,10 +6,8 @@ import { usePageTitle, useVault } from '../hooks';
 import { LabSignIn } from '../components/auth';
 import { describeStorage, formatMB } from '../lib/vault';
 
-const DAW_OPTIONS = ['Ableton Live', 'FL Studio', 'Logic Pro', 'Bitwig', 'Reaper', 'Pro Tools', 'Other'];
-
 /**
- * Settings — theme, DAW, default artist name for stem filenames, and the lab lock.
+ * Settings — theme, default artist name for stem filenames, storage, and the lab lock.
  * Everything here lives in localStorage (see AuthContext prefs); there is no account.
  */
 export function Settings({ theme, t, onThemeToggle }) {
@@ -69,24 +67,6 @@ export function Settings({ theme, t, onThemeToggle }) {
                 Light
               </button>
             </div>
-          </div>
-
-          {/* DAW */}
-          <div>
-            <label htmlFor="daw-preference" className={`block text-sm font-medium mb-1.5 ${t.textMuted}`}>DAW</label>
-            <p className={`text-xs mb-2 ${t.textDimmed}`}>
-              Recipes recommend plugins native to your DAW
-            </p>
-            <select
-              id="daw-preference"
-              value={prefs.dawPreference}
-              onChange={(e) => updatePrefs({ dawPreference: e.target.value })}
-              className={inputClass}
-            >
-              {DAW_OPTIONS.map((daw) => (
-                <option key={daw} value={daw}>{daw}</option>
-              ))}
-            </select>
           </div>
 
           {/* Default artist name — used in stamped stem filenames when a track has no artist */}

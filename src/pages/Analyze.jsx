@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 // Hooks
-import { useAudioProcessor, useHistory, useStemSeparation, usePageTitle, useHelper, useVault, useStemPlayer } from '../hooks';
+import { useAudioProcessor, useStemSeparation, usePageTitle, useHelper, useVault, useStemPlayer } from '../hooks';
 import { useSearchParams } from 'react-router-dom';
 import { vaultIdFor } from '../lib/vault';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,7 +11,6 @@ import { upload } from '@vercel/blob/client';
 // Components
 import { useToast } from '../components/ui/Toast';
 import { LabSignIn } from '../components/auth';
-import { HistoryPanel } from '../components/history';
 import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, InstrumentSelector, AnalyzeSection, StemSelector, StemPlayer, VocalChopKit, TrackAnatomy, PresetSelector, LinkImport } from '../components/audio';
 import { Music, Scissors, Sparkles, Loader2, ArrowLeft, AlertTriangle, UploadCloud, Download } from 'lucide-react';
 import { AnalysisStepFlow } from '../components/analysis';
@@ -20,12 +19,11 @@ import { ExportToolbar } from '../components/comparison';
 // Utils
 import { instrumentLabels } from '../utils/constants';
 import { generateInstrumentRecommendations } from '../utils/recommendations';
-import { generateDemoSound, audioBufferToWav } from '../utils/demoSoundGenerator';
+import { audioBufferToWav } from '../utils/demoSoundGenerator';
 import { displayKeyName, SEPARATION_MODES } from '../utils/stemFiles';
 import { saveBlob, mimeForExt, saveStemsToLive } from '../utils/remixPack';
 
 // Analytics
-import { trackAudioUpload, trackAnalysisStarted, trackAnalysisCompleted, trackPresetExported } from '../lib/posthog';
 
 
 // AI (Gemini) label → app instrument category mapping
@@ -69,14 +67,6 @@ export function Analyze({ theme, t }) {
   const { isSignedIn, prefs } = useAuth();
   const audio = useAudioProcessor();
   const { toast } = useToast();
-  const {
-    history,
-    isOpen: historyOpen,
-    toggleOpen: toggleHistoryOpen,
-    addToHistory,
-    deleteFromHistory,
-    clearHistory,
-  } = useHistory();
   // Stem separation hook
   const {
     stems,
@@ -132,7 +122,6 @@ export function Analyze({ theme, t }) {
   const [error, setError] = useState(null);
   const [selectedInstrument, setSelectedInstrument] = useState('full');
   const [isDragging, setIsDragging] = useState(false);
-  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
 
   // Stem playback state
   const [playingStem, setPlayingStem] = useState(null); // 'vocals' | 'drums' | 'bass' | 'other' | null
@@ -152,8 +141,6 @@ export function Analyze({ theme, t }) {
   const stemSectionRef = useRef(null);
   const waveformSectionRef = useRef(null);
   const resultsSectionRef = useRef(null);
-  const analyzeSectionRef = useRef(null);
-  const [showFloatingAnalyze, setShowFloatingAnalyze] = useState(false);
 
   // AI detection state (Gemini-powered, runs after heuristic analysis)
   const [aiDetectionStatus, setAIDetectionStatus] = useState('idle'); // idle | uploading | detecting | done | error
@@ -241,20 +228,6 @@ export function Analyze({ theme, t }) {
     return () => { cancelled = true; };
   }, [audio.audioBuffer]);
 
-  // IntersectionObserver: show floating Analyze button when AnalyzeSection scrolls out of view
-  useEffect(() => {
-    const el = analyzeSectionRef.current;
-    if (!el) {
-      setShowFloatingAnalyze(false);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => setShowFloatingAnalyze(!entry.isIntersecting),
-      { threshold: 0 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [audioFileData, analysis]);
 
   // Handlers that wrap audio processor methods (declared before useEffect that uses them)
   const handleTogglePlayback = useCallback(async () => {
@@ -548,12 +521,6 @@ export function Analyze({ theme, t }) {
     setAnalyzingStemType(stemTypeOverride || null);
     setError(null);
 
-    trackAnalysisStarted({
-      regionStart: audio.loopEnabled ? audio.loopStart : undefined,
-      regionEnd: audio.loopEnabled ? audio.loopEnd : undefined,
-      stemType: stems && ['vocals', 'drums', 'bass', 'other'].includes(effectiveStem) ? effectiveStem : undefined,
-    });
-
     // Determine which audio to analyze:
     // If a stem is selected and we have stems available, use the stem audio
     // Otherwise use the full track
@@ -665,48 +632,12 @@ export function Analyze({ theme, t }) {
       setCompletedSteps(new Set([1]));
       setExpandedSteps(new Set([2]));
 
-      trackAnalysisCompleted({
-        instrument: instrumentToUse,
-        bpm: result.features.bpm?.bpm,
-        key: result.features.key?.scale,
-        waveformType: result.features.waveform?.type,
-      });
-
-      // Save to history
-      {
-        const isRegionAnalysis = analysisOptions.regionStart != null;
-        // Strip any existing parenthetical suffix to prevent duplication
-        // e.g. "Pumpin (bass)" → "Pumpin", "Pumpin (bass) (bass)" → "Pumpin"
-        const baseTitle = (audioMetadata.title || 'Untitled').replace(/(\s*\([^)]*\))+$/, '').trim();
-        let historyTitle = baseTitle;
-        if (isAnalyzingStem) {
-          historyTitle = `${baseTitle} (${effectiveStem})`;
-        } else if (isRegionAnalysis) {
-          historyTitle = `${baseTitle} (${audio.formatTime(analysisOptions.regionStart)}-${audio.formatTime(analysisOptions.regionEnd)})`;
-        }
-        addToHistory({
-          id: Date.now().toString(),
-          title: historyTitle,
-          instrument: instrumentToUse,
-          timestamp: Date.now(),
-          features: result.features,
-          recommendations,
-          detectedInstruments: instrumentDetection,
-          analyzedStem: isAnalyzingStem ? effectiveStem : null,
-          regionStart: isRegionAnalysis ? analysisOptions.regionStart : null,
-          regionEnd: isRegionAnalysis ? analysisOptions.regionEnd : null,
-          // Persist URLs for session restore
-          audioUrl: audioBlobUrl || null,
-          audioFilename: audioMetadata.title || null,
-          stemUrls: stems || null,
-        });
-      }
     }
 
     setIsAnalyzing(false);
     setAnalyzingStemType(null);
     toast.success('Analysis complete');
-  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, addToHistory, stems, stemAudioData, getStemAudio, prefs.dawPreference, runAIDetection, audioBlobUrl, toast]);
+  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, stems, stemAudioData, getStemAudio, prefs.dawPreference, runAIDetection, audioBlobUrl, toast]);
 
   // Quick re-analyze: regenerate recommendations for a different instrument
   // without re-running the full DSP pipeline (audio region hasn't changed)
@@ -797,8 +728,8 @@ export function Analyze({ theme, t }) {
     e.stopPropagation();
   };
 
-  const ALLOWED_EXTENSIONS = ['wav', 'mp3', 'm4a'];
-  const ALLOWED_MIME_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a'];
+  const ALLOWED_EXTENSIONS = ['wav', 'mp3', 'm4a', 'flac'];
+  const ALLOWED_MIME_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/x-flac'];
 
   const isAllowedAudioFile = (file) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
@@ -816,7 +747,7 @@ export function Analyze({ theme, t }) {
       if (isAllowedAudioFile(file)) {
         processAudioFile(file);
       } else {
-        toast.error('Unsupported format. Please upload a WAV, MP3, or M4A file.');
+        toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
       }
     }
   };
@@ -854,8 +785,6 @@ export function Analyze({ theme, t }) {
       setAudioFileData(event.target.result);
     };
     reader.readAsArrayBuffer(file);
-
-    trackAudioUpload(file.name, file.size);
   };
 
   // Track pulled in through the local helper (YouTube / SoundCloud → FLAC) with real metadata
@@ -873,45 +802,11 @@ export function Analyze({ theme, t }) {
       importFilename: meta.filename || null,
     });
     setAudioFileData(arrayBuffer);
-    trackAudioUpload(meta.filename || 'import.flac', arrayBuffer.byteLength);
     toast.success(meta.savedTo
       ? `Got it — saved to Remix Lab/Sources as ${meta.filename}`
       : `Loaded ${meta.artist ? `${meta.artist} — ` : ''}${meta.title}`);
   };
 
-  // Demo sound handler — generates a synth chord via Web Audio API
-  const handleLoadDemo = useCallback(async () => {
-    if (isLoadingDemo) return;
-
-    setIsLoadingDemo(true);
-    setError(null);
-
-    try {
-      const wavBuffer = await generateDemoSound();
-      setAudioMetadata({ title: 'Demo Synth Chord', artist: 'SoundSauce Demo' });
-      setAudioFileData(wavBuffer);
-      setAnalysis(null);
-      setWavetableData(null);
-      setDetectedInstruments(null);
-      audio.reset();
-      handleClearLoop();
-      clearStems();
-      setPlayingStem(null);
-      setActiveStemView(null);
-      setStemWaveformPreview(null);
-      stemWaveformHiResRef.current = null;
-      stemWaveformColorRef.current = null;
-      stemWaveformDataRef.current = {};
-      setStemLoopRegions({});
-
-      trackAudioUpload('demo-synth.wav', 0);
-    } catch (err) {
-      toast.error('Failed to generate demo sound');
-      console.warn('Demo sound generation failed:', err);
-    } finally {
-      setIsLoadingDemo(false);
-    }
-  }, [isLoadingDemo, audio.reset, handleClearLoop, clearStems]);
 
   // Stem separation handlers
   // Metadata used for stamped stem filenames + Remix Pack notes. Prefers the full
@@ -1266,27 +1161,13 @@ export function Analyze({ theme, t }) {
       if (isAllowedAudioFile(file)) {
         processAudioFile(file);
       } else {
-        toast.error('Unsupported format. Please upload a WAV, MP3, or M4A file.');
+        toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
       }
     }
   };
 
-  // History functions
-  const loadFromHistory = (item) => {
-    // Restore just the analysis results (no audio/stems) — the Vault handles full restores
-    setAnalysis({
-      features: item.features,
-      recommendations: item.recommendations,
-      instrument: item.instrument
-    });
-    setSelectedInstrument(item.instrument);
-    setDetectedInstruments(item.detectedInstruments || null);
-    setAudioMetadata({ title: item.title, artist: 'From History' });
-  };
-
   // Preset selection callback from PresetSelector (fires on select, NOT download)
   const handlePresetSelected = () => {
-    trackPresetExported(selectedInstrument || 'lead');
   };
 
   // Preset download callback — fires only when user actually downloads a .vital file
@@ -1473,17 +1354,6 @@ Generated by SoundSauce`;
 
         {/* Sound Analyzer */}
         <>
-        {/* History Panel */}
-        <HistoryPanel
-          history={history}
-          onLoad={loadFromHistory}
-          onDelete={deleteFromHistory}
-          onClearAll={clearHistory}
-          theme={theme}
-          isOpen={historyOpen}
-          onToggle={toggleHistoryOpen}
-        />
-
         {/* Vault restore in progress */}
         {restoringTrack && (
           <div className={`flex items-center gap-3 p-3 mb-4 rounded-lg border font-mono text-[12px] ${theme === 'dark' ? 'bg-[#0D0F12] border-[#1C2027] text-[#9AA4B0]' : 'bg-white border-[#D9DDE3] text-[#4B5563]'}`}>
@@ -1493,7 +1363,7 @@ Generated by SoundSauce`;
         )}
 
         {/* Paste a link / search — via the local helper */}
-        <LinkImport helper={helper} onImported={handleImported} onBatch={handleBatch} batch={batch} onCancelBatch={cancelBatch} disabled={isLoadingDemo || (!!batch && !batch.done)} hero={!audioFileData && !analysis} theme={theme} t={t} />
+        <LinkImport helper={helper} onImported={handleImported} onBatch={handleBatch} batch={batch} onCancelBatch={cancelBatch} disabled={!!batch && !batch.done} hero={!audioFileData && !analysis} theme={theme} t={t} />
 
         {/* Upload Section with Drag & Drop */}
         <AudioUploadSection
@@ -1503,8 +1373,6 @@ Generated by SoundSauce`;
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
-          onLoadDemo={handleLoadDemo}
-          isLoadingDemo={isLoadingDemo}
           showWelcome={!audioFileData && !analysis}
           dropZoneRef={dropZoneRef}
           theme={theme}
@@ -1512,7 +1380,7 @@ Generated by SoundSauce`;
         />
 
         {audioFileData && (
-          <div className={`backdrop-blur-xl rounded-2xl p-6 mb-6 shadow-2xl border ${t.cardAlt}`}>
+          <div className={`p-6 mb-6 border ${t.cardAlt}`}>
             {/* Audio Metadata Header — Signal Deck: artwork, Syne title, mono readout, spectrum chips */}
             <div className="flex items-center gap-4 mb-2">
               <div className={`w-16 h-16 flex items-center justify-center rounded-md overflow-hidden flex-shrink-0 border ${
@@ -1644,19 +1512,7 @@ Generated by SoundSauce`;
               t={t}
             />
 
-            {/* Action Area — adapts based on audio length and stem state */}
-            <div ref={analyzeSectionRef}>
-            {/* Analyze button — always visible */}
-            <AnalyzeSection
-              loopEnabled={activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled}
-              loopStart={activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart}
-              loopEnd={activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd}
-              formatTime={audio.formatTime}
-              isAnalyzing={isAnalyzing}
-              onAnalyze={activeStemView ? () => runAnalysis(activeStemView) : runAnalysis}
-              theme={theme}
-            />
-
+            <div>
             {/* Stem separation — always visible for non-short audio */}
             {audio.duration > 15 && (
               <div className="mb-6" ref={stemSectionRef}>
@@ -1727,6 +1583,17 @@ Generated by SoundSauce`;
                 )}
               </div>
             )}
+
+            {/* Deeper analysis — the old analyzer flow (features, instrument, Vital recipe). Secondary to stems. */}
+            <AnalyzeSection
+              loopEnabled={activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled}
+              loopStart={activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart}
+              loopEnd={activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd}
+              formatTime={audio.formatTime}
+              isAnalyzing={isAnalyzing}
+              onAnalyze={activeStemView ? () => runAnalysis(activeStemView) : runAnalysis}
+              theme={theme}
+            />
             </div>
 
             {/* Detected Instruments — shown AFTER analysis (non-compact, outside step flow) */}
@@ -1804,39 +1671,6 @@ Generated by SoundSauce`;
           reason={signInReason}
         />
 
-        {/* Floating Analyze CTA — appears when main AnalyzeSection scrolls out of view */}
-        {audioFileData && !analysis && showFloatingAnalyze && (
-          (() => {
-            const viewLoopEnabled = activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled;
-            const viewLoopStart = activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart;
-            const viewLoopEnd = activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd;
-            const hasRegion = viewLoopEnabled && viewLoopStart != null && viewLoopEnd != null;
-            const regionDuration = hasRegion ? (viewLoopEnd - viewLoopStart).toFixed(1) : null;
-
-            return (
-              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
-                <button
-                  onClick={() => runAnalysis(activeStemView || undefined)}
-                  disabled={isAnalyzing}
-                  className={`flex items-center gap-2 px-6 py-3 rounded-full font-semibold shadow-lg transition-all ${
-                    theme === 'dark'
-                      ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600 shadow-ember-500/30'
-                      : 'bg-ember-600 text-white hover:bg-ember-700 shadow-ember-600/30'
-                  } backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  {isAnalyzing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : hasRegion ? (
-                    <Scissors className="w-4 h-4" />
-                  ) : (
-                    <Sparkles className="w-4 h-4" />
-                  )}
-                  {isAnalyzing ? 'Analyzing...' : hasRegion ? `Analyze Selection (${regionDuration}s)` : 'Analyze'}
-                </button>
-              </div>
-            );
-          })()
-        )}
       </div>
     </div>
   );

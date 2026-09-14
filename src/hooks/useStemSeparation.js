@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { upload } from '@vercel/blob/client';
 import { zipSync, strToU8 } from 'fflate';
-import { trackStemSeparationStarted, trackStemSeparationCompleted } from '../lib/posthog';
 import { labAuthHeaders, getLabToken } from '../lib/labAuth';
 import {
   SEPARATION_MODES,
@@ -273,7 +272,6 @@ export function useStemSeparation() {
         setProgress(100);
         predictionIdRef.current = null;
         predictionTokenRef.current = null;
-        trackStemSeparationCompleted();
 
         // Vocals mode: re-host both files right away so the vault entry never expires
         if (autoKeepRef.current) {
@@ -413,8 +411,6 @@ export function useStemSeparation() {
       predictionIdRef.current = data.predictionId;
       predictionTokenRef.current = data.token || '';
       setProgress(35);
-
-      trackStemSeparationStarted();
 
       // Poll every 2 seconds
       pollIntervalRef.current = setInterval(pollStatus, 2000);

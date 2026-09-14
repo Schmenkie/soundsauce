@@ -24,7 +24,6 @@
 
 import { rateLimit } from './_rateLimit.js';
 import { requireLab, signPredictionId } from './_auth.js';
-import { posthog, getDistinctId } from './_posthog.js';
 
 export const config = {
   maxDuration: 60, // Allow up to 60 seconds for the initial request
@@ -130,16 +129,6 @@ export default async function handler(req, res) {
     // Ownership token: check-stems.js verifies this so prediction IDs can't be enumerated.
     const token = signPredictionId(prediction.id);
 
-    posthog.capture({
-      distinctId: getDistinctId(req, 'lab'),
-      event: 'stem_separation_started',
-      properties: {
-        prediction_id: prediction.id,
-        mode,
-        model_name: modelName,
-      },
-    });
-
     return res.status(200).json({
       predictionId: prediction.id,
       token,
@@ -150,7 +139,6 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    posthog.captureException(error, getDistinctId(req, 'lab'));
     console.error('Stem separation error:', error);
     return res.status(500).json({
       error: 'Internal server error',

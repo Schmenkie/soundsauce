@@ -1,5 +1,4 @@
 import { Component } from 'react';
-import { captureException } from '../../lib/sentry';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { themeClasses } from '../../utils/constants';
 
@@ -26,11 +25,6 @@ class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
-    try {
-      captureException(error);
-    } catch {
-      // Sentry not loaded or DSN not set — silently ignore
-    }
   }
 
   handleReset = () => {

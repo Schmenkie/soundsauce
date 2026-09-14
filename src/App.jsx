@@ -1,10 +1,9 @@
-import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useTheme } from './hooks';
 import { PageLayout } from './components/layout';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
-import { trackPageView } from './lib/posthog';
 
 // Lazy-load pages for route-level code splitting
 const Analyze = lazy(() => import('./pages/Analyze').then(m => ({ default: m.Analyze })));
@@ -32,11 +31,6 @@ function PageFallback() {
  */
 export default function App() {
   const { theme, setTheme, t } = useTheme('dark');
-  const location = useLocation();
-
-  useEffect(() => {
-    trackPageView(location.pathname);
-  }, [location.pathname]);
 
   const handleThemeToggle = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');

@@ -101,21 +101,5 @@ export const tooltipDefinitions = {
 };
 
 // Frequency band labels for display
-export const frequencyBandLabels = {
-  subBass: 'Sub',
-  bass: 'Bass',
-  lowMid: 'Low',
-  mid: 'Mid',
-  highMid: 'Hi-Mid',
-  high: 'High'
-};
 
 // Frequency band ranges with Hz values
-export const frequencyBandRanges = {
-  subBass: '20-60 Hz',
-  bass: '60-250 Hz',
-  lowMid: '250-500 Hz',
-  mid: '500-2000 Hz',
-  highMid: '2-6 kHz',
-  high: '6-20 kHz'
-};

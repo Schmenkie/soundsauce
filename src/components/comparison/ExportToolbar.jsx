@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 import { Copy, Share2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { trackShareClicked } from '../../lib/posthog';
 
 /**
  * Copy + Share toolbar — uses toast for feedback.
@@ -21,15 +20,13 @@ export function ExportToolbar({ onCopy, onShare, theme }) {
   const handleShare = useCallback(async () => {
     if (!onShare) return;
     try {
-      const { text, title, instrument } = onShare();
+      const { text, title } = onShare();
 
       if (navigator.share) {
         await navigator.share({ title, text });
-        trackShareClicked('web_share_api', instrument);
       } else {
         await navigator.clipboard.writeText(text);
         toast.success('Share text copied to clipboard');
-        trackShareClicked('clipboard_fallback', instrument);
       }
     } catch (err) {
       // User cancelled the share dialog — not an error

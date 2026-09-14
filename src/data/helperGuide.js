@@ -47,7 +47,6 @@ export const GUIDE = {
           { name: 'DRM notice', cost: 'free', what: 'Major-label SoundCloud uploads are protected streams. The Lab searches by name instead — pick the YouTube result.' },
           { name: 'Upload Audio / drop a file', cost: 'free', what: 'WAV, MP3, M4A or FLAC from your Mac. Nothing is uploaded until you separate.' },
           { name: 'save file (header)', cost: 'download', what: 'Saves the imported FLAC from memory to Downloads. The Sources folder already has a copy.' },
-          { name: 'Try Demo Sound', cost: 'free', what: 'A generated synth chord to poke at the analyzer.' },
         ],
       },
       {
@@ -57,7 +56,7 @@ export const GUIDE = {
           { name: 'Drag on the waveform', cost: 'free', what: 'Selects a region for analysis and looping. Esc clears it.' },
           { name: 'Zoom −/+', cost: 'free', what: 'Up to 64× on the waveform; the overview strip below shows where you are.' },
           { name: 'BPM / key chips', cost: 'free', what: 'Quick detection on decode. A "~" before the key means low confidence — hover for the runner-up keys.' },
-          { name: 'ANALYZE', cost: 'free', what: 'Runs the full analysis (features, envelope, instrument guess) on the selection or the first 30 s and opens the step flow. Uses Gemini once for instrument labels — negligible.' },
+          { name: 'Deeper analysis (bottom of the page)', cost: 'free', what: 'The older sound-design analyzer: envelope, timbre, instrument guess and a Vital recipe for the selection (or the first 30 s). Uses Gemini once for instrument labels — negligible. Secondary to the stems tools.' },
         ],
       },
       {
@@ -76,7 +75,7 @@ export const GUIDE = {
           { name: 'To Live', cost: 'disk', what: 'Writes the stems + notes.txt into ~/Music/Remix Lab/Stems/<Artist - Title>/ so they show in Live\'s browser. Nothing goes to Blob.' },
           { name: 'Remix Pack', cost: 'download', what: 'Zip of every stem plus notes.txt (tempo, key, Camelot neighbours, warp tips) to Downloads.' },
           { name: 'Full Track', cost: 'free', what: 'Not a download. Switches the Analyze / Play target back from a stem to the whole mix.' },
-          { name: 'Stem card: analyze', cost: 'free', what: 'Shows this stem in the waveform and runs the analysis on it.' },
+          { name: 'Stem card: analyze', cost: 'free', what: 'Shows this stem in the waveform and runs the deeper analysis on it.' },
           { name: 'Stem card: play', cost: 'free', what: 'Plays just this stem through the main player.' },
           { name: 'Stem card: ↓', cost: 'download', what: 'Saves this one stem as a stamped FLAC.' },
           { name: 'kept / keep', cost: 'blob', what: '"KEPT" = permanent on Blob. "keep" = still on Replicate; click to re-host it (~25 MB per stem).' },

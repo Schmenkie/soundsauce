@@ -3,7 +3,6 @@ import {
   Play, Pause, Download, Loader2, Scissors, X, Check, Mic, Disc, Activity, Piano,
   Music, Sparkles, Guitar, Layers, Cloud, CloudOff, Package, RotateCcw, FolderInput
 } from 'lucide-react';
-import { trackStemSelected } from '../../lib/posthog';
 import { SEPARATION_MODES, getStemLabel } from '../../utils/stemFiles';
 import { stemColor } from '../../utils/spectrum';
 import { MiniSpectrum } from '../ui/MiniSpectrum';
@@ -123,14 +122,12 @@ function StemCard({
       onClick={() => {
         if (isAvailable) {
           onSelect(stemType);
-          trackStemSelected(stemType);
         }
       }}
       onKeyDown={(e) => {
         if ((e.key === 'Enter' || e.key === ' ') && isAvailable) {
           e.preventDefault();
           onSelect(stemType);
-          trackStemSelected(stemType);
         }
       }}
       aria-label={`Select ${label} stem`}

@@ -15,27 +15,34 @@ This file provides context for AI assistants working on this project.
 
 It started life as a community "learn to recreate any sound" platform (Discover, likes, follows, DMs, challenges, Stripe tiers, Supabase). That version is preserved in git at commit **`c28e4f0`** ("Checkpoint: SoundSauce social platform before Remix Lab pivot") — restore any piece with `git checkout c28e4f0 -- <path>`. In September 2026 it was cut down to a single-user lab because the social layer never found users and the only feature in daily use was stem separation (Live 12 Standard lacks Suite's built-in separation).
 
-## Where Things Stand (handoff — updated 2026-09-14, end of session)
+## Where Things Stand (handoff — updated 2026-09-14, late)
 
-**Deployed**: production at https://www.soundsauce.app runs commit `73410f8` (deployed 2026-09-14, the whole 8-item queue). Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` is valid). On the Mac, run `npm run menubar:install` once: it puts the 🟢 status dot in the menu bar and (re)starts the helper with the new `/stems` endpoints.
+**Deployed**: https://www.soundsauce.app runs the latest `main` (every commit through the codebase audit). Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` is valid). The menubar app is installed on the Mac (`app.soundsauce.remix-menubar` LaunchAgent) and supervises the helper.
 
-**Daily workflow now**: menubar dot green → Lab → Cmd+V a link (or a set/playlist → tick → "Grab vocals from N") → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → Grab Vocals → auto-kept, in `/vault` → **To Live** drops stems into `~/Music/Remix Lab/Stems/<Artist - Title>/` → **Stem Player** to solo/mute/loop bars, **Anatomy** for structure + chords, **Vocal Chops** → chops folder → `/calc` for transpose/tempo → `/notes` to write it up (tick "public" to show it on the portfolio page).
+**Daily workflow**: menubar dot green → Lab → Cmd+V a link (a set/playlist → tick → "Grab vocals from N"; a DRM'd SoundCloud link → pick the YouTube result it offers) → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → Grab Vocals → auto-kept, in `/vault` → **To Live** → `~/Music/Remix Lab/Stems/<Artist - Title>/` → Stem Player / Anatomy / Vocal Chops → `/calc` → `/notes`. The floating icon's **"What does this do?"** tab explains every button and what it costs.
 
-**The queue is finished.** Nothing is left from the 2026-09-14 list. Suggested next things, in rough value order:
+**Direction decisions Spencer made on 2026-09-14** (don't re-litigate):
+- Single user, local helper, password-gated GPU. Not opening it to other artists — strangers could run up the Replicate bill.
+- The old analysis → preset → "recreate it" flow stays in the code but is **demoted** (a quiet "Deeper analysis" row at the bottom of the Lab). Revisit after a Vital-in-the-loop prototype (see below).
+- **No analytics**: PostHog, Sentry and web-vitals are gone.
+- **Ableton only**: the DAW picker and the FL Studio / Logic / Reaper / Pro Tools tables are gone; `data/dawPlugins.js` is Live-only.
 
-1. **Deploy + a real-use pass** — Spencer should use it for a remix and log friction. Things I'd watch: the Stem Player's grid assumes bar 1 = 0:00 (use "bar 1 here"); the Anatomy's chord labels are triad templates on a whole bar (good for one-chord house, rough on busy harmony); vocal chop sensitivity was tuned on one Demucs stem.
-2. **Vault delete → also delete chops/stems on disk?** No — local files are Spencer's; leave them.
-3. **Blob budget reality**: a 6:36 track costs ~215 MB (source FLAC + two stems); the "~N more tracks fit" estimate assumes 55 MB. Consider not keeping the source upload for long tracks, or showing the per-track size (now on Vault cards) in the estimate.
-4. **Batch grab options** — quality toggle (`fast` for big sets), skip tracks already in the vault by `sourceUrl`.
-5. Fun ideas still parked: mashup preview in-browser (the Stem Player's multi-source engine + playbackRate is most of it), Vault as a Camelot wheel, reference A/B, `.als` generation, restyle `AnalysisStepFlow` content cards to Signal Deck.
+**Suggested next things, in rough value order:**
+1. **Vital-in-the-loop prototype** — Spencer wants to know whether a sampled synth part can be re-synthesised closely enough to skip clearance. The honest read: the current preset matcher optimises against a Web Audio *imitation* of Vital, so its ceiling is low. Prototype: helper endpoint → Spotify `pedalboard` loads `/Library/Audio/Plug-Ins/VST3/Vital.vst3` headlessly → render one note → CMA-ES over ~30 Vital params against a single isolated note (stems + chop kit give the target) with a multi-scale log-mel loss → A/B five targets by ear. Build the UI only if 3 of 5 convince. Scope: synth basses/leads/plucks/pads; not vocals, acoustic, drums or FX-defined sounds. Legal note for the pitch: re-synthesis dodges the *master* clearance, not the *composition* — recognisable melodies are still interpolations.
+2. **Blob budget reality** — long tracks cost ~215 MB, not 55; consider not keeping the source upload, or basing the "tracks that fit" estimate on actual per-track sizes (now on Vault cards).
+3. **Batch grab options** — `fast` quality for big sets; skip tracks already in the vault by `sourceUrl`.
+4. **Signal Deck leftovers** — `Settings.jsx`, `AnalysisStepFlow` content cards, `PresetSelector` and `SaucyHelper` still use the re-pointed `zinc/stone/amber` tokens. They render correctly; converting them is cosmetic.
+5. Parked ideas: mashup preview (Stem Player engine + playbackRate), Vault as a Camelot wheel, reference A/B, `.als` generation.
 
 **Gotchas for whoever picks this up**
-- The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`). In that pane, **Enter doesn't submit forms and `form_input` doesn't fire React onChange** — click buttons / `form.requestSubmit()` when verifying.
-- Vercel Blob is at ~500 MB / 1 GB (two vault tracks: Tell Me What You Want, Lauren — plus a few orphans from earlier tests). The Vault's delete button frees space.
-- The helper must be running on the Mac for link import, To Live and chops; the deployed site can't do it alone. An orphaned helper from an earlier session may hold :7331 (`pkill -f remix-helper.mjs`; the menubar app then restarts it).
-- `motion/react` welcome animations render blank in hidden Browser-pane screenshots; it's not a bug.
+- The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`). In that pane **Enter doesn't submit forms and `form_input` doesn't fire React onChange** — click buttons / `form.requestSubmit()` when verifying. Its screenshots often render at quarter size; use `read_page` for facts.
+- **Chrome Local Network Access**: the deployed HTTPS site reaching `http://localhost:7331` needs Chrome's per-site "local network" permission (138+). If the dot is green but the Lab says off: site info → Site settings → Local network access → Allow. Safari never allows it. The offline card explains this.
+- **DRM**: major-label SoundCloud uploads are encrypted streams; yt-dlp refuses them (correctly — don't work around it). `/resolve` derives a name from the URL slug and returns a search instead.
+- Vercel Blob is at ~575 MB / 1 GB (three vault tracks). The Vault's delete button frees space.
+- An orphaned helper from an earlier session may hold :7331 (`pkill -f remix-helper.mjs`; the menubar app restarts it within 10 s on the current code).
 - Key detection ground truth: `scripts/key-truth.json` (117 tracks, Camelot codes from Rekordbox via `pyrekordbox` reading `~/Library/Pioneer/rekordbox/master.db`). Re-run `node scripts/key-bench.mjs` after touching `detectKey`; the numbers to beat are in the comment above `KEY_DETECT_DEFAULTS`.
-- `useToast()` returns `{ toast }` — destructure it (Vault.jsx had `const toast = useToast()` for a while and every toast there silently threw).
+- `useToast()` returns `{ toast }` — destructure it.
+- `src/data/helperGuide.js` is the in-app manual — **update it whenever a button is added, renamed or moved.**
 
 ## Tech Stack
 
@@ -50,12 +57,11 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 | Storage | Vercel Blob (source uploads + kept stems). ~1 GB on Hobby |
 | Auth | Single lab password → HMAC session token (`api/_auth.js`). No Supabase, no accounts |
 | Instrument detection | Heuristic scoring in the worker + Gemini 2.5 Flash refinement (`api/instrument.js`) |
-| Presets | Curated Vital preset library (`src/data/vitalPresets.js`, 100 presets) + `.vital` builder |
+| Presets | Curated Vital preset library (`src/data/vitalPresets.js`, 100 presets) + `.vital` builder — part of the demoted "Deeper analysis" flow |
 | Zip | `fflate` (Remix Pack) |
 | Animation | `motion/react` (Dock, Step, modals) |
 | Icons | `lucide-react` (must stay in `package.json` deps — a missing entry broke Vercel builds in May 2026) |
-| Analytics | PostHog via `/ingest` reverse proxy (shared cross-project "data-hub" key); Sentry optional |
-| Testing | Vitest (60 tests) + Playwright smoke tests |
+| Testing | Vitest (66 tests) + Playwright smoke tests (`e2e/smoke.spec.js`: routes, helper guide, sign-in dialog) |
 | Deploy | Vercel (`vercel build --prod && vercel deploy --prebuilt --prod`) |
 
 ## Project Structure
@@ -66,7 +72,6 @@ audio-analyzer-pro/
 │   ├── _auth.js                 # Lab password gate: checkPassword, issueToken, verifyToken, requireLab, signPredictionId
 │   ├── _rateLimit.js            # In-memory sliding-window rate limiter (per instance)
 │   ├── _validateEnv.js          # Env var presence check helper
-│   ├── _posthog.js              # Server-side PostHog client
 │   ├── auth.js                  # POST {password} → {token, expiresAt}; GET verifies a token
 │   ├── upload-audio.js          # @vercel/blob client-upload token endpoint (wav/mp3/m4a/flac, 100 MB)
 │   ├── _vaultIndex.js           # Shared reader for vault/index.json (used by vault.js and notes.js)
@@ -89,22 +94,18 @@ audio-analyzer-pro/
 │   ├── lib/
 │   │   ├── helper.js            # Client for the local helper (health, resolve, jobs, file URLs, clipboard URL sniffing)
 │   │   ├── vault.js             # Vault client: fetch/save/deleteBlobs, vaultIdFor(), Camelot + tempo compatibility helpers
-│   │   ├── labAuth.js           # getLabToken, labAuthHeaders, labSignIn, labVerify, labSignOut (localStorage)
-│   │   ├── posthog.js           # PostHog init + tracking helpers (many are legacy no-ops now)
-│   │   ├── sentry.js            # Optional error monitoring
-│   │   └── webVitals.js         # Core Web Vitals → PostHog
+│   │   └── labAuth.js           # getLabToken, labAuthHeaders, labSignIn, labVerify, labSignOut (localStorage)
 │   ├── contexts/AuthContext.jsx # AuthProvider/useAuth: { isSignedIn, loading, signIn, signOut, prefs, updatePrefs }
 │   ├── components/
 │   │   ├── auth/LabSignIn.jsx   # Password modal (focus trap, dock auto-hide)
 │   │   ├── layout/Dock.jsx      # Vertical dock: Lab, Settings, theme, lock/unlock
 │   │   ├── layout/PageLayout.jsx
-│   │   ├── audio/               # LinkImport (paste link / search / playlist batch), AudioUploadSection, WaveformVisualizer, PlaybackControls,
-│   │   │                        # SpectrumAnalyzer, AnalyzeSection, InstrumentSelector, StemSelector, StemPlayer (arrangement map),
-│   │   │                        # TrackAnatomy (study guide), VocalChopKit, PresetSelector
-│   │   ├── analysis/            # AnalysisStepFlow, StepFlow, Step, ADSREnvelope, ResultsTabs, SoundRecipe (SoundSauce + VitalGuide)
+│   │   ├── audio/               # LinkImport (paste link / search / playlist batch / DRM fallback), AudioUploadSection (drop zone; one line once loaded),
+│   │   │                        # WaveformVisualizer, PlaybackControls, SpectrumAnalyzer, StemSelector, StemPlayer (arrangement map),
+│   │   │                        # TrackAnatomy (study guide), VocalChopKit, AnalyzeSection ("Deeper analysis" row), InstrumentSelector, PresetSelector
+│   │   ├── analysis/            # AnalysisStepFlow, StepFlow, Step, ADSREnvelope, SoundRecipe (SoundSauce + VitalGuide) — the demoted recreate flow
 │   │   ├── comparison/ExportToolbar.jsx
-│   │   ├── history/HistoryPanel.jsx   # Recent analyses (localStorage) — interim until the Vault lands
-│   │   └── ui/                  # Tooltip, FeatureCard, ErrorBoundary, Toast, SynthKnob, Skeleton, SaucyHelper, …
+│   │   └── ui/                  # Tooltip, ErrorBoundary, Toast, SynthKnob, InstrumentIllustration, MiniSpectrum, SaucyHelper (tips + "What does this do?" manual)
 │   ├── hooks/
 │   │   ├── useAudioProcessor.js # Web Audio playback + analysis orchestration (+ detectTempoAndKey proxy)
 │   │   ├── useAudioWorker.js    # Worker RPC (analyzeAudio, detectInstruments, detectTempoAndKey, spectral match, …)
@@ -112,14 +113,13 @@ audio-analyzer-pro/
 │   │   ├── useStemPlayer.js     # Synced multi-stem playback (own AudioContext, per-stem gains, loop), lane waveforms
 │   │   ├── useVault.js          # Vault state: cached load, serialised whole-index saves, upsertTrack/removeTrack
 │   │   ├── useHelper.js         # Helper availability (15s poll + focus), resolve(query), grab(url) with job progress
-│   │   ├── useHistory.js        # localStorage recent analyses
 │   │   ├── useTheme.js, usePageTitle.js, useFocusTrap.js
 │   ├── pages/
 │   │   ├── Calc.jsx             # /calc — Remix Calculator: transpose / tempo / warp advice, vault pickers, 0-shift targets
 │   │   ├── Vault.jsx            # /vault — track grid, search, Camelot + tag chips, "mixes with", inline edit, keep / keep all, pack / to live / 4-stem, delete
 │   │   ├── Notes.jsx            # /notes — Remix Notes journal per vault track (unlocked) / public portfolio (visitors)
 │   │   ├── Analyze.jsx          # The Lab (route "/") — upload, waveform, stems, analysis step flow
-│   │   ├── Settings.jsx         # Theme, DAW, artist name, lab lock, storage note
+│   │   ├── Settings.jsx         # Theme, artist name, lab lock, Blob storage readout
 │   │   └── NotFound.jsx
 │   ├── utils/
 │   │   ├── remixMath.js         # Pure calculator math: camelotOf, relativeKey, transposeSemitones, tempoChange, warpAdvice, compatibleTargets
@@ -127,13 +127,13 @@ audio-analyzer-pro/
 │   │   ├── vocalChops.js        # detectPhrases (adaptive gate), encodeWavSlice, buildChopFilename — pure, tested
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes
-│   │   ├── constants.js, recommendations.js, demoSoundGenerator.js, validateEnv.js
-│   ├── data/                    # vitalPresets.js, vitalInitTemplate.json, dawPlugins.js, flStudioPlugins.js,
+│   │   ├── constants.js (themeClasses, instrumentLabels), recommendations.js (Ableton-only), demoSoundGenerator.js (preset preview renderer + optimizer)
+│   ├── data/                    # vitalPresets.js, vitalInitTemplate.json, dawPlugins.js (Ableton Live only + detectSoundType / PARAMETER_TRANSLATIONS),
 │   │                            # helperGuide.js (the floating helper's manual: every button per page + its cost tag — keep it in sync with UI changes)
 │   ├── services/vitalPresetGenerator.js
 │   └── workers/audio.worker.js  # All heavy DSP
 ├── .claude/launch.json          # "dev" (Vite only) and "full" (Vite + dev-api) preview configs
-├── vercel.json                  # SPA rewrite, /ingest PostHog proxy, CSP + security headers
+├── vercel.json                  # SPA rewrite, CSP + security headers
 └── vite.config.js               # /api → :3001 proxy in dev, vendor chunks, vitest config
 ```
 
@@ -190,7 +190,7 @@ One JSON document, `vault/index.json` on Vercel Blob, read/written only through 
 
 ### Preferences (was "profile")
 
-`useAuth().prefs` = `{ dawPreference, artistName }` in `localStorage['soundsauce_prefs']`. `updatePrefs(patch)` merges.
+`useAuth().prefs` = `{ dawPreference, artistName }` in `localStorage['soundsauce_prefs']`. `updatePrefs(patch)` merges. `dawPreference` is always `'Ableton Live'` now (the picker is gone); it's still threaded through the recipe code.
 
 ### Stem separation pipeline
 
@@ -217,7 +217,7 @@ Browser                         Vercel Blob        api/*                        
 
 ### The Lab page (`src/pages/Analyze.jsx`)
 
-Route `/` (legacy `/analyze` redirects). Flow: upload → waveform (drag-to-select region, 64× zoom) → header BPM/key chip → `StemSelector` (mode picker → progress → stem cards) → **`StemPlayer`** (when stems are ready) → `AnalyzeSection` → post-analysis `AnalysisStepFlow` (Identify → Preset → Recreate → Full Analysis).
+Route `/` (legacy `/analyze` redirects). Order on the page: paste-a-link box → drop zone (a full panel when nothing is loaded, one line afterwards) → track header (artwork, BPM/key chips) → waveform (drag-to-select region, 64× zoom) → spectrum → playback → `StemSelector` (mode picker → progress → stem cards) → `StemPlayer` → `TrackAnatomy` → `VocalChopKit` → `AnalyzeSection` ("Deeper analysis", the demoted old analyzer) → post-analysis `AnalysisStepFlow` (Identify → Preset → Recreate → Full Analysis). The Analysis History panel, demo sound and floating Analyze CTA were removed in the Sep 14 audit.
 
 ### Stem Player + Arrangement Map
 
@@ -235,7 +235,7 @@ Route `/` (legacy `/analyze` redirects). Flow: upload → waveform (drag-to-sele
 
 ### Local development
 
-`npm run dev:full` runs Vite (:5173) and `scripts/dev-api.mjs` (:3001) together; Vite proxies `/api/*`. The API runner loads `.env.local` then `.env.local.vercel` (pulled production vars — never bundled) and hot-reloads `api/*.js` per request. The `/ingest` PostHog proxy 404s locally by design. The Browser-pane launch config is `full`.
+`npm run dev:full` runs Vite (:5173) and `scripts/dev-api.mjs` (:3001) together; Vite proxies `/api/*`. The API runner loads `.env.local` then `.env.local.vercel` (pulled production vars — never bundled) and hot-reloads `api/*.js` per request. The Browser-pane launch config is `full`.
 
 ### Web Worker (`/src/workers/audio.worker.js`)
 Offloads heavy DSP operations to background thread:
@@ -419,11 +419,8 @@ Vercel, custom domain **https://soundsauce.app**. Always deploy with `vercel bui
 | `REPLICATE_API_TOKEN` | Vercel | Demucs stem separation |
 | `BLOB_READ_WRITE_TOKEN` | Vercel | Vercel Blob (auto-added when the store is connected) |
 | `GEMINI_API_KEY` | Vercel | Gemini instrument detection |
-| `VITE_POSTHOG_KEY` | Vercel + `.env.local` | PostHog (shared data-hub project key) |
-| `VITE_SENTRY_DSN` | optional | Sentry |
-| `POSTHOG_PERSONAL_API_KEY` | `.env.local` only | Was used by the deleted daily report script |
 
-Removed with the pivot (safe to delete from Vercel): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_*`, `VITE_STRIPE_*`, `RESEND_API_KEY`.
+No `VITE_*` variable is needed any more. Safe to delete from Vercel and `.env.local`: `VITE_POSTHOG_KEY`, `VITE_SENTRY_DSN`, `POSTHOG_PERSONAL_API_KEY`, and the pivot leftovers `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_*`, `VITE_STRIPE_*`, `RESEND_API_KEY`.
 
 ### Storage budget
 
@@ -450,13 +447,14 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Known Issues / Debt
 
-- ESLint: ~10 React-19 `set-state-in-effect` style warnings and 2 pre-existing errors (`Step.jsx`/`Toast.jsx` Fast Refresh export shape, `vitalPresets.js` unused var). Zero runtime bugs.
-- `src/lib/posthog.js` still exports ~30 tracking helpers for deleted features. Harmless; trim when convenient.
-- `PresetSelector.jsx` is ~1,400 lines and still carries the A/B compare panel and auto-optimize sweep from the preset-accuracy work. Useful for recreating bass/lead stems; leave unless it gets in the way.
+- ESLint: ~12 React-19 `set-state-in-effect` style warnings and a handful of pre-existing errors (`Step.jsx` / `Toast.jsx` / `AuthContext.jsx` Fast Refresh export shape, `SaucyHelper` set-state-in-effect, `vitalPresets.js` unused var). Zero runtime bugs.
+- `PresetSelector.jsx` is ~1,400 lines and still carries the A/B compare panel and auto-optimize sweep from the preset-accuracy work. Part of the demoted recreate flow; leave until the Vital prototype decides its fate.
 - Vercel CLI login is valid as of Sep 14 2026.
-- `e2e/smoke.spec.js` doesn't cover `/notes` or the Stem Player yet.
+- `e2e/smoke.spec.js` doesn't exercise the Stem Player (needs a vault track + token).
 
 ## Completed
+
+- [x] **Codebase audit** (Sep 14 2026, late) — removed PostHog + Sentry + web-vitals (deps, `/ingest` rewrites, CSP hosts, `api/_posthog.js`, all `track*` calls), the Analysis History panel + `useHistory`, the demo sound, `validateEnv`, unused UI components (AnimatedCounter, FeatureCard, MiniAudioPlayer, Skeleton, ResultsTabs), unused constants, the DAW picker and the FL Studio / Logic / Reaper / Pro Tools tables (`flStudioPlugins.js` deleted, `dawPlugins.js` is Ableton-only and now hosts `detectSoundType` / `PARAMETER_TRANSLATIONS`). Demoted the old analyzer: `AnalyzeSection` is a quiet "Deeper analysis" row after the stems tools, floating Analyze CTA gone. `AudioUploadSection` rewritten (Signal Deck; one line once a track is loaded). Fixed: the drop zone advertised FLAC but rejected it. Vault cards re-cut by workflow priority; helper manual added (`helperGuide.js`); DRM SoundCloud fallback; Chrome local-network explanation. e2e smoke now covers /vault, /calc, /notes and the guide.
 
 - [x] **Helper manual** (Sep 14 2026) — `SaucyHelper` now has a "What does this do?" tab: searchable, per-page accordion of every control with a cost tag (free / GPU $ / blob / disk / download) and a "What costs what" summary. Content lives in `src/data/helperGuide.js` — **update it when adding or renaming a button.** Also: DRM-protected SoundCloud links fall back to a name search (YouTube usually has the track); the offline card explains Chrome's local-network permission.
 

@@ -1,10 +1,7 @@
 export { default as Tooltip } from './Tooltip';
-export { default as FeatureCard } from './FeatureCard';
 export { ErrorBoundary } from './ErrorBoundary';
-export { AnimatedCounter } from './AnimatedCounter';
 export { SynthKnob } from './SynthKnob';
 export { InstrumentIllustration } from './InstrumentIllustration';
 export { ToastProvider, useToast } from './Toast';
-export { SkeletonBlock, SkeletonCircle, SkeletonPill, SkeletonCard } from './Skeleton';
 export { SaucyHelper } from './SaucyHelper';
 export { MiniSpectrum } from './MiniSpectrum';

@@ -237,7 +237,7 @@ export function AnalysisStepFlow({
           </div>
           <VitalGuide
             features={analysis.features}
-            soundType={getDAWRecipe(analysis.features, selectedInstrument, 'FL Studio').soundType}
+            soundType={getDAWRecipe(analysis.features, selectedInstrument, 'Ableton Live').soundType}
             theme={theme}
             t={t}
           />
