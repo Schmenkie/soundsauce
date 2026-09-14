@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff } from 'lucide-react';
+import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVault, usePageTitle } from '../hooks';
 import { useToast } from '../components/ui/Toast';
@@ -116,6 +116,14 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
             <span className="hidden sm:inline">pack</span>
           </button>
         )}
+        <Link
+          to={`/calc?track=${encodeURIComponent(track.id)}`}
+          className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
+          title="Open in the Remix Calculator"
+          aria-label={`Open ${track.title} in the calculator`}
+        >
+          <Calculator className="w-3.5 h-3.5" />
+        </Link>
         <button
           type="button"
           onClick={() => onSetReference(isReference ? null : track)}

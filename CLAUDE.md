@@ -33,7 +33,7 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 | Animation | `motion/react` (Dock, Step, modals) |
 | Icons | `lucide-react` (must stay in `package.json` deps — a missing entry broke Vercel builds in May 2026) |
 | Analytics | PostHog via `/ingest` reverse proxy (shared cross-project "data-hub" key); Sentry optional |
-| Testing | Vitest (51 tests) + Playwright smoke tests |
+| Testing | Vitest (60 tests) + Playwright smoke tests |
 | Deploy | Vercel (`vercel build --prod && vercel deploy --prebuilt --prod`) |
 
 ## Project Structure
@@ -85,11 +85,13 @@ audio-analyzer-pro/
 │   │   ├── useHistory.js        # localStorage recent analyses
 │   │   ├── useTheme.js, usePageTitle.js, useFocusTrap.js
 │   ├── pages/
+│   │   ├── Calc.jsx             # /calc — Remix Calculator: transpose / tempo / warp advice, vault pickers, 0-shift targets
 │   │   ├── Vault.jsx            # /vault — track grid, search, Camelot chips, "mixes with" mode, pack/stem downloads, delete
 │   │   ├── Analyze.jsx          # The Lab (route "/") — upload, waveform, stems, analysis step flow
 │   │   ├── Settings.jsx         # Theme, DAW, artist name, lab lock, storage note
 │   │   └── NotFound.jsx
 │   ├── utils/
+│   │   ├── remixMath.js         # Pure calculator math: camelotOf, relativeKey, transposeSemitones, tempoChange, warpAdvice, compatibleTargets
 │   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl (shared by Lab + Vault)
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes
@@ -136,6 +138,16 @@ One JSON document, `vault/index.json` on Vercel Blob, read/written only through 
 - **Delete** removes the entry and `del()`s its stem + source blobs, then refreshes the Blob usage summary (shown as a spectrum bar against the 1 GB Hobby cap).
 - **Compatibility mode** ("mixes with"): `compatibleCamelot()` (same, ±1, relative) and `tempoCompatible()` (±8%, or half/double) in `lib/vault.js`.
 - Downloads from the Vault go through `utils/remixPack.js`, which fetches stem URLs and zips client-side (expired Replicate URLs surface as "re-separate the track").
+
+### Remix Calculator (`/calc`)
+
+`utils/remixMath.js` is pure and tested (`remixMath.test.js`). Source = the vocal (prefilled from `/calc?track=<id>` or a vault picker), target = the project (remembered in `localStorage['soundsauce_calc_target']`).
+
+- **Transpose**: shortest shift in [-6, +6]. When modes differ, the target is replaced by its relative key first (Bb min → Db maj = 0 st, same seven notes); `exact` keeps the tonic-to-tonic shift.
+- **Tempo**: straight, half-time and double-time readings; the smallest |%| wins and is what the warp advice and Live recipe use.
+- **Warp advice**: ≤5% clean Complex Pro, ≤10% fine, ≤18% audible, beyond that Re-Pitch (with the pitch it introduces — `repitchSemitones(ratio)` — subtracted from the transpose figure).
+- **Compatible targets**: same / relative / ±1 on the Camelot wheel, each with its semitone cost; zero-shift options first. Clicking one sets the target.
+- Vault cards link to `/calc?track=<id>`.
 
 ### Preferences (was "profile")
 
@@ -332,7 +344,7 @@ npm run helper       # Local yt-dlp companion only (localhost:7331)
 npm run helper:install  # Install the helper as a macOS LaunchAgent (starts at login)
 npm run build        # Production build to /dist (frontend only)
 npm run lint         # ESLint
-npm run test:run     # Vitest once (51 tests: DSP algorithms, curated presets, a11y)
+npm run test:run     # Vitest once (60 tests: DSP, curated presets, remix math, a11y)
 npm run test:e2e     # Playwright smoke tests (needs dev server)
 vercel build --prod && vercel deploy --prebuilt --prod   # Deploy (includes /api functions)
 ```
@@ -371,7 +383,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 | 2b | **Link import (local helper)** | ✅ Done | yt-dlp companion; paste a YouTube/SoundCloud link or search by name; FLAC + artist/title/artwork |
 | 2c | **Signal Deck UI** | ✅ Foundation done | Chosen from 3 mock directions. Tokens, fonts, grid, Dock, header, frequency-coloured waveform, spectrum analyzer, stem channel strips with live meters. Remaining: AnalysisStepFlow content cards, Settings polish |
 | 3 | **Acapella Vault** (`/vault`) | ✅ Done | Index of every kept track as `vault/index.json` on Blob (single user → read-modify-write is fine). Search by artist/title, filter by Camelot key / BPM range, re-download, delete (frees Blob), "find compatible". Save an entry at separation time; restore a session from a vault item (replaces the deleted Supabase `?id=` restore). Reuse Discover's grid/filter UI from `c28e4f0` |
-| 4 | **Remix Calculator** (`/calc`) | Planned | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
+| 4 | **Remix Calculator** (`/calc`) | ✅ Done | Source key/BPM → target key/BPM → semitones, tempo %, warp-mode advice (<10% Complex Pro), Camelot alternatives. Prefill from a vault item |
 | 5 | **Stem Player + Arrangement Map** | Planned | Synced mute/solo of all stems; stacked stem waveforms with a bar grid from BPM (stem waveform data is already cached per stem in Analyze) |
 | 6 | **Anatomy of a Track** | Planned | Run the analysis pipeline per stem and present it as a study guide (reframes InstrumentSelector / ADSR / feature cards) |
 | 7 | **Remix Notes** (`/notes`) | Planned | Journal per vault item: source, what was pulled, key/tempo changes, lessons, SoundCloud link of the result. Public-facing portfolio |
@@ -387,6 +399,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Remix Calculator** (Sep 2026) — `utils/remixMath.js` (+9 tests), `pages/Calc.jsx`, Dock item, vault card link, SaucyHelper tips. Verified: Bb min vocal → C min project = +2 st / −3.1%; → Db maj = 0 st via relative.
 - [x] **Key detection fix** (Sep 2026) — `detectKey` analysed only the first ~1.4 s, mislabelled pitch classes by 9 semitones, and inverted the K-S rotation. Now: 200 windows across the whole track, harmonic pitch-class profile from spectral peaks (f/1..f/4, bass boost), confidence + alternatives. Tell Me What You Want → Bb minor 3A (was E/G#/F#m). `scripts/key-check.mjs` runs the detector on any file. Conventional flat spellings via `displayKeyName()`.
 - [x] **Acapella Vault** (Sep 2026) — `api/vault.js`, `lib/vault.js`, `useVault`, `pages/Vault.jsx`, `utils/remixPack.js`; auto-save on stems ready / keep; `/?track=<id>` restore; Dock item; SaucyHelper tips.
 - [x] **Signal Deck UI — foundation** (Sep 2026)

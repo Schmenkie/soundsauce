@@ -20,6 +20,11 @@ const ROUTE_TIPS = {
     { title: 'Mixes With', tip: 'Hit the link icon on a track to see everything in a compatible key (Camelot neighbours) and tempo.' },
     { title: 'Free Space', tip: 'Removing a track deletes its stems and source upload — the storage bar at the top shows the 1 GB budget.' },
   ],
+  '/calc': [
+    { title: 'Zero Is Best', tip: 'A green 0 st means the vocal already fits — the relative major/minor shares the same notes.' },
+    { title: 'Under 10%', tip: 'Tempo stretches under ~10% stay clean in Complex Pro. Past that, try a half/double-time reading or Re-Pitch.' },
+    { title: 'Remembered', tip: 'The project side is saved between visits — set it once per session.' },
+  ],
   '/settings': [
     { title: 'Set Your DAW', tip: 'Choose your DAW to get tailored plugin recommendations in every recipe.' },
     { title: 'Lock the Lab', tip: 'Separation and uploads cost money, so they sit behind the lab password.' },
