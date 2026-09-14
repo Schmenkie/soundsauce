@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link2, Search, Loader2, Download, Clipboard, ChevronDown, ChevronUp, Music, X, ListMusic } from 'lucide-react';
+import { Link2, Search, Loader2, Download, Clipboard, ChevronDown, ChevronUp, Music, X, ListMusic, Check, Copy } from 'lucide-react';
 import { extractMediaUrl, formatDuration } from '../../lib/helper';
 
 /**
@@ -9,7 +9,7 @@ import { extractMediaUrl, formatDuration } from '../../lib/helper';
  * Props come from useHelper(): online, health, checking, resolving, resolve, job, grab.
  * onImported({ arrayBuffer, meta }) hands the file to the Lab.
  */
-export function LinkImport({ helper, onImported, disabled, theme, t }) {
+export function LinkImport({ helper, onImported, disabled, hero = false, theme, t }) {
   const { online, health, checking, resolving, resolve, job, grab } = helper;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -17,6 +17,7 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
   const [clipboardUrl, setClipboardUrl] = useState(null);
   const [showSetup, setShowSetup] = useState(false);
   const [grabbingUrl, setGrabbingUrl] = useState(null);
+  const [copied, setCopied] = useState(false);
   const inputRef = useRef(null);
   const isDark = theme === 'dark';
 
@@ -38,6 +39,25 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
     return () => window.removeEventListener('focus', sniffClipboard);
   }, [sniffClipboard]);
 
+  // Paste anywhere: Cmd+V on the page (not inside another input) with a YouTube /
+  // SoundCloud link grabs it immediately — no need to find the box first.
+  const handleResolveRef = useRef(null);
+  useEffect(() => {
+    if (!online) return undefined;
+    const onPaste = (e) => {
+      const target = e.target;
+      const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (inField && target !== inputRef.current) return;
+      const url = extractMediaUrl(e.clipboardData?.getData('text'));
+      if (!url) return;
+      e.preventDefault();
+      setQuery(url);
+      handleResolveRef.current?.(url);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [online]);
+
   const handleResolve = async (q = query) => {
     const trimmed = q.trim();
     if (!trimmed || resolving) return;
@@ -55,6 +75,8 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
       setError(err.message);
     }
   };
+
+  handleResolveRef.current = handleResolve;
 
   const handleGrab = async (item) => {
     if (!item?.url || grabbingUrl) return;
@@ -90,6 +112,9 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
   };
 
   // ---- Offline: compact hint + setup instructions ---------------------------
+  const copyCmd = async () => {
+    try { await navigator.clipboard.writeText('npm run helper'); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  };
   if (!online) {
     return (
       <div className={`p-4 mb-4 rounded-lg border border-dashed ${isDark ? 'border-[#2A3039] bg-[#0D0F12]/60' : 'border-[#B8BEC7] bg-[#F5F6F8]'}`}>
@@ -98,15 +123,20 @@ export function LinkImport({ helper, onImported, disabled, theme, t }) {
             <Link2 className={`w-4 h-4 ${t.textMuted}`} />
           </div>
           <div className="flex-1 min-w-[200px]">
-            <p className={`text-sm font-medium ${t.text}`}>
-              {checking ? 'Looking for the helper…' : health && !health.ok ? 'Helper found, but it needs yt-dlp + ffmpeg' : 'Paste YouTube / SoundCloud links'}
+            <p className={`font-display font-bold uppercase tracking-wide text-[13px] ${t.text}`}>
+              {checking ? 'Looking for the helper…' : health && !health.ok ? 'Helper found, but it needs yt-dlp + ffmpeg' : 'Paste-a-link is off'}
             </p>
-            <p className={`text-xs ${t.textDimmed}`}>
+            <p className={`font-mono text-[11px] mt-0.5 ${t.textDimmed}`}>
               {health && !health.ok
-                ? `brew install yt-dlp ffmpeg — then it just works`
-                : 'Start the local helper to grab tracks by link or by name.'}
+                ? 'brew install yt-dlp ffmpeg — then it just works'
+                : 'Run the helper on this Mac and YouTube / SoundCloud links turn into FLACs here.'}
             </p>
           </div>
+          {!checking && !(health && !health.ok) && (
+            <button type="button" onClick={copyCmd} className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-mono text-[12px] ${t.button}`} title="Copy the command, run it in a terminal in the project folder">
+              {copied ? <Check className="w-3.5 h-3.5 text-[#34D399]" /> : <Copy className="w-3.5 h-3.5" />} npm run helper
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowSetup(v => !v)}
@@ -133,8 +163,15 @@ npm run helper:install`}
   }
 
   // ---- Online ----------------------------------------------------------------
+  const isUrl = !!extractMediaUrl(query);
   return (
-    <div className={`p-3 mb-4 rounded-lg border ${isDark ? 'border-[#1C2027] bg-[#0D0F12]' : 'border-[#D9DDE3] bg-white'}`}>
+    <div className={`${hero ? 'p-5 sm:p-6' : 'p-3'} mb-4 rounded-lg border ${isDark ? 'border-[#1C2027] bg-[#0D0F12]' : 'border-[#D9DDE3] bg-white'}`}>
+      {hero && (
+        <div className="mb-4">
+          <h3 className={`font-display font-extrabold uppercase tracking-tight text-xl ${t.text}`}>Paste a link. Get the file.</h3>
+          <p className={`font-mono text-[12px] mt-1 ${t.textMuted}`}>YouTube or SoundCloud → lossless FLAC, loaded here and saved to <span className={t.text}>~/Music/Remix Lab/Sources</span>. Cmd+V anywhere on this page works too.</p>
+        </div>
+      )}
       <form
         onSubmit={(e) => { e.preventDefault(); handleResolve(); }}
         className="flex items-center gap-2"
@@ -146,15 +183,7 @@ npm run helper:install`}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onPaste={(e) => {
-              const url = extractMediaUrl(e.clipboardData.getData('text'));
-              if (url) {
-                e.preventDefault();
-                setQuery(url);
-                handleResolve(url);
-              }
-            }}
-            placeholder="paste a youtube / soundcloud link — or type a track name"
+            placeholder={hero ? 'https://soundcloud.com/… or youtube.com/watch?v=…' : 'paste a link, or type a track name'}
             disabled={disabled || !!grabbingUrl}
             aria-label="Track link or search"
             className={`flex-1 py-2.5 bg-transparent font-mono text-[13px] outline-none ${t.text} ${isDark ? 'placeholder:text-[#4B5563]' : 'placeholder:text-[#9AA4B0]'}`}
@@ -168,12 +197,12 @@ npm run helper:install`}
         <button
           type="submit"
           disabled={disabled || !query.trim() || resolving || !!grabbingUrl}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-semibold disabled:opacity-50 ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-semibold whitespace-nowrap disabled:opacity-50 ${
             isDark ? 'bg-ember-500 text-[#1A1400] hover:bg-ember-400' : 'bg-ember-600 text-white hover:bg-ember-700'
           }`}
         >
-          {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : extractMediaUrl(query) ? <Download className="w-4 h-4" /> : <Search className="w-4 h-4" />}
-          <span className="hidden sm:inline">{resolving ? 'Looking…' : extractMediaUrl(query) ? 'Grab' : 'Search'}</span>
+          {resolving || grabbingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : isUrl || !query ? <Download className="w-4 h-4" /> : <Search className="w-4 h-4" />}
+          <span>{grabbingUrl ? 'Getting…' : resolving ? 'Looking…' : isUrl || !query ? 'Get file' : 'Search'}</span>
         </button>
       </form>
 

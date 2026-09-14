@@ -106,7 +106,7 @@ export function AudioUploadSection({
               transition={{ delay: 0.2 }}
               className={`text-lg sm:text-xl font-bold font-display mb-1.5 ${t.text}`}
             >
-              Upload a sound or try our demo
+              Or drop a file
             </motion.h3>
             <motion.p
               initial={{ opacity: 0, y: 10 }}
@@ -114,7 +114,7 @@ export function AudioUploadSection({
               transition={{ delay: 0.3 }}
               className={`text-sm mb-6 max-w-md ${t.textMuted}`}
             >
-              Drop in any audio file to analyze it, or load a demo synth sound to see how it works.
+              WAV, MP3, M4A or FLAC from your Mac — or load the demo synth to see how it works.
             </motion.p>
 
             {/* Button row */}

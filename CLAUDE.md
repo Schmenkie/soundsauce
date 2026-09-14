@@ -15,6 +15,24 @@ This file provides context for AI assistants working on this project.
 
 It started life as a community "learn to recreate any sound" platform (Discover, likes, follows, DMs, challenges, Stripe tiers, Supabase). That version is preserved in git at commit **`c28e4f0`** ("Checkpoint: SoundSauce social platform before Remix Lab pivot") — restore any piece with `git checkout c28e4f0 -- <path>`. In September 2026 it was cut down to a single-user lab because the social layer never found users and the only feature in daily use was stem separation (Live 12 Standard lacks Suite's built-in separation).
 
+## Where Things Stand (handoff — updated 2026-09-14)
+
+**Deployed**: production at https://www.soundsauce.app runs commit `3197a75` (Vault + Calculator + Signal Deck + key fix). Everything after that in `### Completed` is local until the next `vercel build --prod && vercel deploy --prebuilt --prod`. Vercel CLI login is valid (`scurnow24-2856`).
+
+**Daily workflow that works today**: run `npm run helper` (or install it once with `npm run helper:install`) → open the Lab → Cmd+V a YouTube/SoundCloud link → FLAC lands in the Lab and in `~/Music/Remix Lab/Sources/` → Grab Vocals → stems auto-keep to Blob and the track appears in `/vault` → `/calc` tells you transpose/tempo for your project.
+
+**Open feedback from Spencer**
+- Frequency-coloured waveforms "look like garbage" — keep the colour-is-frequency idea but calm it down (fewer hue changes, smoother mapping, or colour only the played portion). Not started.
+- Key detection must be right — verified on one track (Bb minor). Spot-check more with `scripts/key-check.mjs`.
+
+**Next in the roadmap**: Stem Player + Arrangement Map → Anatomy → Remix Notes. Compatibility Finder already exists inside the Vault ("mixes with").
+
+**Gotchas for whoever picks this up**
+- The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`).
+- Vercel Blob is at ~360 MB / 1 GB after the test grabs; the Vault's delete button frees space.
+- The helper must be running on the Mac for link import — the deployed site can't do it alone.
+- `motion/react` welcome animations render blank in hidden Browser-pane screenshots; it's not a bug.
+
 ## Tech Stack
 
 | Category | Technology |
@@ -125,7 +143,7 @@ yt-dlp cannot run on Vercel (Python + ffmpeg, and YouTube blocks datacenter IPs)
 - `POST /resolve {query}` — URL → single track (or playlist entries); free text → `ytsearch5` + `scsearch5` interleaved. yt-dlp's SoundCloud extractor covers SoundCloud, no cobalt needed.
 - `POST /jobs {url}` → `yt-dlp -f bestaudio -x --audio-format flac --embed-metadata --write-info-json --write-thumbnail`; `GET /jobs/:id` reports `phase` (downloading/converting/finishing) + progress parsed from `--newline` output; `GET /files/:id` streams the FLAC, `/files/:id/thumb` the cover.
 - Metadata: `splitArtistTitle()` prefers yt-dlp's `artist`/`track`, else splits "Artist - Title", else uses the uploader; strips "(Official Video)" noise. Files are also copied to `~/Music/Remix Lab/Sources/<Artist - Title>.flac` for Live's browser.
-- Frontend: `useHelper()` polls `/health`; `LinkImport` shows a setup card when offline, otherwise a paste/search box with clipboard-link suggestion, results list, and a progress bar. `Analyze.handleImported()` loads the FLAC exactly like an upload and sets `audioMetadata` (artist, title, thumbnailUrl, sourceUrl) — the header shows the artwork and stem filenames get the real artist.
+- Frontend: `useHelper()` polls `/health`; `LinkImport` shows a setup card when offline (with a copyable `npm run helper`), otherwise a paste/search box. With no audio loaded it renders as the Lab's hero ("Paste a link. Get the file."). A document-level `paste` listener means **Cmd+V anywhere on the page** with a media URL starts the grab; the button reads "Get file" for URLs and "Search" for text. After import the header shows a `save file` button (downloads the FLAC from memory) and the toast names the file saved under `~/Music/Remix Lab/Sources/`. `Analyze.handleImported()` loads the FLAC exactly like an upload and sets `audioMetadata` (artist, title, thumbnailUrl, sourceUrl) — the header shows the artwork and stem filenames get the real artist.
 - Keep yt-dlp current (`brew upgrade yt-dlp`) — YouTube breaks old versions every few months; the helper's `/health` reports the version.
 
 ### The Vault
@@ -399,6 +417,7 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 
 ## Completed
 
+- [x] **Paste-a-link UX pass** (Sep 14 2026) — `LinkImport` hero mode, global Cmd+V paste, "Get file" CTA, copyable helper command when offline; `Analyze` keeps `savedTo`/`importFilename` in `audioMetadata`, header `save file` button, clearer toast; upload card becomes "Or drop a file".
 - [x] **Remix Calculator** (Sep 2026) — `utils/remixMath.js` (+9 tests), `pages/Calc.jsx`, Dock item, vault card link, SaucyHelper tips. Verified: Bb min vocal → C min project = +2 st / −3.1%; → Db maj = 0 st via relative.
 - [x] **Key detection fix** (Sep 2026) — `detectKey` analysed only the first ~1.4 s, mislabelled pitch classes by 9 semitones, and inverted the K-S rotation. Now: 200 windows across the whole track, harmonic pitch-class profile from spectral peaks (f/1..f/4, bass boost), confidence + alternatives. Tell Me What You Want → Bb minor 3A (was E/G#/F#m). `scripts/key-check.mjs` runs the detector on any file. Conventional flat spellings via `displayKeyName()`.
 - [x] **Acapella Vault** (Sep 2026) — `api/vault.js`, `lib/vault.js`, `useVault`, `pages/Vault.jsx`, `utils/remixPack.js`; auto-save on stems ready / keep; `/?track=<id>` restore; Dock item; SaucyHelper tips.
