@@ -187,6 +187,11 @@ export function useAudioWorker() {
    * @param {number} sampleRate
    * @returns {Promise<{ bpm: Object, key: Object }>}
    */
+  /** Per-bar anatomy of a stem: structure, chords / bass roots, drum density, band balance */
+  const analyzeStemAnatomy = useCallback((channelData, sampleRate, options) => {
+    return postMessage('ANALYZE_STEM_ANATOMY', { channelData: channelData.buffer.slice(0), sampleRate, options });
+  }, [postMessage]);
+
   const detectTempoAndKey = useCallback(async (channelData, sampleRate) => {
     const [bpm, key] = await Promise.all([
       postMessage('DETECT_BPM', { channelData: channelData.buffer.slice(0), sampleRate }),
@@ -201,6 +206,7 @@ export function useAudioWorker() {
     analyzeAudio,
     detectInstruments,
     detectTempoAndKey,
+    analyzeStemAnatomy,
     generateWaveformColors,
     calculateSpectralMatch,
     detectHarmonics,

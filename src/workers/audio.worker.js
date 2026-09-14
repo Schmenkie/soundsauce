@@ -488,6 +488,181 @@ function detectKey(channelData, sampleRate, options = {}) {
 }
 
 // =============================================================================
+// Stem anatomy — per-bar structure, chords, bass roots, drum density, band balance
+// =============================================================================
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+/** Peak-based pitch-class profile of one magnitude spectrum between loHz and hiHz */
+function chromaFromSpectrum(magnitudes, freqResolution, loHz, hiHz, topPeaks = 12) {
+  const chroma = new Array(12).fill(0);
+  const loBin = Math.max(1, Math.ceil(loHz / freqResolution));
+  const hiBin = Math.min(magnitudes.length - 2, Math.floor(hiHz / freqResolution));
+  let windowMax = 0;
+  for (let i = loBin; i <= hiBin; i++) if (magnitudes[i] > windowMax) windowMax = magnitudes[i];
+  if (windowMax <= 0) return chroma;
+  const floor = windowMax * 0.02;
+  const peaks = [];
+  for (let i = loBin; i <= hiBin; i++) {
+    const mag = magnitudes[i];
+    if (mag < floor || mag <= magnitudes[i - 1] || mag < magnitudes[i + 1]) continue;
+    const a = magnitudes[i - 1], b = mag, c = magnitudes[i + 1];
+    const denom = a - 2 * b + c;
+    const shift = denom !== 0 ? 0.5 * (a - c) / denom : 0;
+    peaks.push({ freq: (i + shift) * freqResolution, weight: Math.sqrt(mag) });
+  }
+  peaks.sort((a, b) => b.weight - a.weight);
+  for (const { freq, weight } of peaks.slice(0, topPeaks)) {
+    const pc = (((Math.round(12 * Math.log2(freq / 440)) + 9) % 12) + 12) % 12;
+    chroma[pc] += weight;
+  }
+  return chroma;
+}
+
+/** Best-matching triad for a chroma vector: { label, root, quality, score } or null */
+function matchTriad(chroma) {
+  const total = chroma.reduce((a, b) => a + b, 0);
+  if (total <= 0) return null;
+  const norm = chroma.map(c => c / total);
+  let best = null;
+  for (let root = 0; root < 12; root++) {
+    for (const [quality, third] of [['maj', 4], ['min', 3]]) {
+      // Root weighs most, then fifth, then third; every other note counts against
+      const score = norm[root] * 1.0 + norm[(root + 7) % 12] * 0.8 + norm[(root + third) % 12] * 0.7
+        - norm[(root + (quality === 'maj' ? 3 : 4)) % 12] * 0.5;
+      if (!best || score > best.score) best = { root, quality, score };
+    }
+  }
+  const label = `${NOTE_NAMES[best.root]}${best.quality === 'min' ? 'm' : ''}`;
+  return { ...best, label };
+}
+
+/**
+ * Per-bar anatomy of one stem. All timings come from the tempo + grid offset so the
+ * results line up with the arrangement map.
+ * @returns {{ barSec, numBars, bars: { index, rmsDb, active, chord, bass, onsets }[], bands, rmsDb, peakDb, activeFrom, activeBars }}
+ */
+function analyzeStemAnatomy(channelData, sampleRate, { bpm = 0, gridOffset = 0, stemType = 'other' } = {}) {
+  const duration = channelData.length / sampleRate;
+  const barSec = bpm > 0 ? 240 / bpm : 2;
+  const numBars = Math.max(1, Math.ceil((duration - gridOffset) / barSec));
+  const wantChords = stemType === 'other' || stemType === 'piano' || stemType === 'guitar';
+  // Only a real bass stem: in two-stem mode "other" still has the kick, whose tuning
+  // masquerades as a root note
+  const wantBass = stemType === 'bass';
+  const wantOnsets = stemType === 'drums';
+
+  // --- global loudness + band balance (100 windows spread over the stem) ---
+  const win = 4096;
+  const freqRes = sampleRate / win;
+  const bandEdges = [0, 120, 400, 2000, 6000, 20000]; // sub / low / mid / high / air
+  const bands = new Array(5).fill(0);
+  const windows = Math.min(100, Math.max(1, Math.floor(channelData.length / win)));
+  const stride = (channelData.length - win) / Math.max(1, windows - 1);
+  for (let w = 0; w < windows; w++) {
+    const start = Math.floor(w * stride);
+    const mags = computeMagnitudeSpectrum(channelData.subarray(start, start + win), win);
+    for (let i = 1; i < mags.length; i++) {
+      const hz = i * freqRes;
+      const e = mags[i] * mags[i];
+      for (let b = 0; b < 5; b++) if (hz >= bandEdges[b] && hz < bandEdges[b + 1]) { bands[b] += e; break; }
+    }
+  }
+  const bandTotal = bands.reduce((a, b) => a + b, 0) || 1;
+  const bandShares = bands.map(e => e / bandTotal);
+
+  // --- per-bar RMS ---
+  const bars = [];
+  let peakDb = -Infinity;
+  let sumSq = 0;
+  for (let i = 0; i < channelData.length; i++) sumSq += channelData[i] * channelData[i];
+  const overallDb = 20 * Math.log10(Math.sqrt(sumSq / channelData.length) + 1e-9);
+  for (let b = 0; b < numBars; b++) {
+    const s0 = Math.max(0, Math.floor((gridOffset + b * barSec) * sampleRate));
+    const s1 = Math.min(channelData.length, Math.floor((gridOffset + (b + 1) * barSec) * sampleRate));
+    let sq = 0;
+    for (let i = s0; i < s1; i++) sq += channelData[i] * channelData[i];
+    const rmsDb = s1 > s0 ? 20 * Math.log10(Math.sqrt(sq / (s1 - s0)) + 1e-9) : -120;
+    if (rmsDb > peakDb) peakDb = rmsDb;
+    bars.push({ index: b, rmsDb, s0, s1 });
+  }
+  // "active" = within 18 dB of the loudest bar (below that it's residue / tails)
+  const activeGate = peakDb - 18;
+  for (const bar of bars) bar.active = bar.rmsDb > activeGate && bar.rmsDb > -60;
+
+  // --- per-bar chroma → chord + bass root; per-bar onsets for drums ---
+  const chordWin = 8192;
+  const chordRes = sampleRate / chordWin;
+  const bassWin = 32768; // 1.5 Hz bins at 48k — a semitone at Bb1 is only 3.5 Hz
+  const bassRes = sampleRate / bassWin;
+  for (const bar of bars) {
+    bar.chord = null;
+    bar.bass = null;
+    bar.onsets = null;
+    if (!bar.active) continue;
+    if (wantChords || wantBass) {
+      const chroma = new Array(12).fill(0);
+      const bassChroma = new Array(12).fill(0);
+      const span = bar.s1 - bar.s0;
+      const n = Math.max(1, Math.min(6, Math.floor(span / chordWin)));
+      for (let k = 0; k < n; k++) {
+        if (wantChords) {
+          const start = bar.s0 + Math.floor(((k + 0.5) / n) * span) - chordWin / 2;
+          if (start >= 0 && start + chordWin <= channelData.length) {
+            const mags = computeMagnitudeSpectrum(channelData.subarray(start, start + chordWin), chordWin);
+            chromaFromSpectrum(mags, chordRes, 80, 2000).forEach((v, j) => { chroma[j] += v; });
+          }
+        }
+        if (wantBass) {
+          const start = bar.s0 + Math.floor(((k + 0.5) / n) * span) - bassWin / 2;
+          if (start >= 0 && start + bassWin <= channelData.length) {
+            const mags = computeMagnitudeSpectrum(channelData.subarray(start, start + bassWin), bassWin);
+            chromaFromSpectrum(mags, bassRes, 35, 250, 4).forEach((v, j) => { bassChroma[j] += v; });
+          }
+        }
+      }
+      if (wantChords) {
+        const m = matchTriad(chroma);
+        bar.chord = m ? m.label : null;
+      }
+      if (wantBass) {
+        let best = -1, bestV = 0;
+        bassChroma.forEach((v, j) => { if (v > bestV) { bestV = v; best = j; } });
+        bar.bass = best >= 0 ? NOTE_NAMES[best] : null;
+      }
+    }
+    if (wantOnsets) {
+      // Energy-flux onsets inside the bar (10 ms frames), min 80 ms apart
+      const hop = Math.round(sampleRate * 0.01);
+      let prev = 0, count = 0, lastOnset = -Infinity;
+      const frames = [];
+      for (let s = bar.s0; s + hop <= bar.s1; s += hop) {
+        let e = 0;
+        for (let i = s; i < s + hop; i++) e += channelData[i] * channelData[i];
+        frames.push(Math.sqrt(e / hop));
+      }
+      const mean = frames.reduce((a, b) => a + b, 0) / (frames.length || 1);
+      for (let f = 0; f < frames.length; f++) {
+        const flux = frames[f] - prev;
+        if (flux > mean * 0.6 && frames[f] > mean && f - lastOnset >= 8) { count++; lastOnset = f; }
+        prev = frames[f];
+      }
+      bar.onsets = count;
+    }
+  }
+
+  const activeBars = bars.filter(b => b.active).length;
+  const activeFrom = bars.find(b => b.active)?.index ?? null;
+  return {
+    barSec, numBars, activeBars, activeFrom,
+    rmsDb: Math.round(overallDb * 10) / 10,
+    peakDb: Math.round(peakDb * 10) / 10,
+    bands: bandShares,
+    bars: bars.map(({ index, rmsDb, active, chord, bass, onsets }) => ({ index, rmsDb: Math.round(rmsDb * 10) / 10, active, chord, bass, onsets })),
+  };
+}
+
+// =============================================================================
 // ADSR Analysis
 // =============================================================================
 
@@ -2835,6 +3010,10 @@ self.onmessage = function(e) {
           payload.sampleRate,
           reportProgress
         );
+        break;
+
+      case 'ANALYZE_STEM_ANATOMY':
+        result = analyzeStemAnatomy(new Float32Array(payload.channelData), payload.sampleRate, payload.options || {});
         break;
 
       case 'DETECT_BPM':

@@ -9,3 +9,4 @@ export { PresetSelector } from './PresetSelector';
 export { LinkImport } from './LinkImport';
 export { StemPlayer } from './StemPlayer';
 export { VocalChopKit } from './VocalChopKit';
+export { TrackAnatomy } from './TrackAnatomy';

@@ -800,6 +800,7 @@ export function useAudioProcessor() {
     generateWaveformData: worker.generateWaveformData,
     generateWaveformColors: worker.generateWaveformColors,
     extractWavetable: worker.extractWavetable,
-    detectTempoAndKey: worker.detectTempoAndKey
+    detectTempoAndKey: worker.detectTempoAndKey,
+    analyzeStemAnatomy: worker.analyzeStemAnatomy
   };
 }
