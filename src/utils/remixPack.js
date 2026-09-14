@@ -1,6 +1,8 @@
 import { zipSync, strToU8 } from 'fflate';
 import { buildStemFilename, buildPackFilename, buildPackNotes, buildPackFolderName } from './stemFiles';
 import { helperSaveStems } from '../lib/helper';
+import { upload } from '@vercel/blob/client';
+import { labAuthHeaders } from '../lib/labAuth';
 
 const MIME_TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4' };
 
@@ -84,6 +86,29 @@ export function saveStemsToLive(stemUrls, meta, mode) {
     files: types.map(type => ({ name: buildStemFilename(meta, type, mode, extFromUrl(stemUrls[type])), url: stemUrls[type] })),
     notes: buildPackNotes(meta, types, mode),
   });
+}
+
+/**
+ * Re-host a stem on Vercel Blob so it outlives Replicate's ~7-day CDN (the Vault's "keep").
+ * Same layout as useStemSeparation.keepStem: stems/<title>/<stamped name>.
+ * @returns {Promise<{ url: string, size: number }>}
+ */
+export async function keepStemUrl(url, stemType, meta, mode) {
+  if (/\.public\.blob\.vercel-storage\.com/.test(url)) return { url, size: undefined };
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = new Error(res.status === 403 || res.status === 404 ? 'This stem has expired — re-separate the track.' : 'Failed to fetch stem');
+    err.code = res.status === 403 || res.status === 404 ? 'EXPIRED' : 'FETCH';
+    throw err;
+  }
+  const buffer = await res.arrayBuffer();
+  const ext = extFromUrl(url);
+  const filename = buildStemFilename(meta, stemType, mode, ext);
+  const folder = (meta?.title || 'untitled').replace(/[\\/:*?"<>|]/g, '').trim() || 'untitled';
+  const file = new File([buffer], filename, { type: mimeForExt(ext) });
+  const result = await upload(`stems/${folder}/${filename}`, file, { access: 'public', handleUploadUrl: '/api/upload-audio', headers: labAuthHeaders() });
+  if (!result?.url) throw new Error('Upload returned no URL');
+  return { url: result.url, size: buffer.byteLength };
 }
 
 /** Fetch one stem URL and save it with a stamped filename. */

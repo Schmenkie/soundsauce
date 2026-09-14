@@ -21,7 +21,7 @@ import { ExportToolbar } from '../components/comparison';
 import { instrumentLabels } from '../utils/constants';
 import { generateInstrumentRecommendations } from '../utils/recommendations';
 import { generateDemoSound, audioBufferToWav } from '../utils/demoSoundGenerator';
-import { displayKeyName } from '../utils/stemFiles';
+import { displayKeyName, SEPARATION_MODES } from '../utils/stemFiles';
 import { saveBlob, mimeForExt, saveStemsToLive } from '../utils/remixPack';
 
 // Analytics
@@ -970,8 +970,11 @@ export function Analyze({ theme, t }) {
   useEffect(() => { getTrackRef.current = vault.getTrack; }, [vault.getTrack]);
   const lastRestoredRef = useRef(null);
 
+  const [reseparate, setReseparate] = useState(null); // { mode, existingUrl } set by ?track=<id>&mode=stems4
+
   useEffect(() => {
     const trackId = searchParams.get('track');
+    const modeParam = searchParams.get('mode');
     if (!trackId || trackId === lastRestoredRef.current) return;
     const track = getTrackRef.current(trackId);
     if (!track) return; // vault may still be loading — effect re-runs when tracks change
@@ -997,8 +1000,14 @@ export function Analyze({ theme, t }) {
         });
         setAudioFileData(buffer);
         const stemUrls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]).filter(([, u]) => u));
-        if (Object.keys(stemUrls).length) restoreStemsRef.current(stemUrls, track.audioUrl, track.mode);
-        toast.success(`Restored ${track.artist ? `${track.artist} — ` : ''}${track.title}`);
+        if (modeParam && SEPARATION_MODES.some(m => m.id === modeParam)) {
+          // Re-separate with a different mode: the source stays on Blob, so the vault entry updates in place
+          setReseparate({ mode: modeParam, existingUrl: track.audioUrl });
+          toast.success(`Re-separating ${track.title} as ${SEPARATION_MODES.find(m => m.id === modeParam).label}`);
+        } else {
+          if (Object.keys(stemUrls).length) restoreStemsRef.current(stemUrls, track.audioUrl, track.mode);
+          toast.success(`Restored ${track.artist ? `${track.artist} — ` : ''}${track.title}`);
+        }
       } catch (err) {
         setError(err.message || 'Could not restore this track.');
       } finally {
@@ -1009,7 +1018,7 @@ export function Analyze({ theme, t }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, vault.tracks]);
 
-  const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best' } = {}) => {
+  const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best', existingUrl } = {}) => {
     if (!audioFileData) return;
     if (!isSignedIn) {
       setSignInReason('Stem separation runs on a paid GPU — unlock the lab first.');
@@ -1022,8 +1031,16 @@ export function Analyze({ theme, t }) {
     const safeExt = ['wav', 'mp3', 'm4a', 'flac'].includes(ext) ? ext : 'mp3';
     const filename = `${audioMetadata.title || 'audio'}.${safeExt}`;
 
-    await separateStems(audioFileData, filename, { mode, quality, meta: stemMeta });
+    await separateStems(audioFileData, filename, { mode, quality, meta: stemMeta, existingUrl });
   }, [audioFileData, audioMetadata.title, audioMetadata.sourceFilename, separateStems, stemMeta, isSignedIn]);
+
+  // Kick off a re-separation once the restored audio (and its quick BPM/key) is in
+  useEffect(() => {
+    if (!reseparate || !audioFileData || !trackInfo) return;
+    const { mode, existingUrl } = reseparate;
+    setReseparate(null);
+    handleSeparateStems({ mode, quality: 'best', existingUrl });
+  }, [reseparate, audioFileData, trackInfo, handleSeparateStems]);
 
   const handleDownloadPack = useCallback(async () => {
     const ok = await downloadRemixPack(stemMeta);

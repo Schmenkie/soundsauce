@@ -303,6 +303,7 @@ export function useStemSeparation() {
    * @param {'vocals'|'stems4'|'stems6'} [options.mode='vocals']
    * @param {'best'|'fast'} [options.quality='best']
    * @param {boolean} [options.autoKeep] - Re-host stems on Blob when done (default: mode === 'vocals')
+   * @param {string} [options.existingUrl] - Source already on our Blob store: skip the upload, keep the vault id
    * @param {object} [options.meta] - { artist, title, bpm, key } used for persisted filenames
    * @returns {Promise<boolean>} - True if started successfully
    */
@@ -331,17 +332,10 @@ export function useStemSeparation() {
     stopPolling();
 
     try {
-      // Step 1: Upload to Vercel Blob
+      // Step 1: Upload to Vercel Blob (skipped when the source is already there — a vault
+      // track being re-separated keeps its Blob URL, and therefore its vault id)
       setProgress(5);
 
-      const extension = filename.split('.').pop()?.toLowerCase() || 'mp3';
-      const mimeType = MIME_TYPES[extension] || 'audio/mpeg';
-
-      // Convert ArrayBuffer to Blob for upload
-      const audioBlob = new Blob([audioData], { type: mimeType });
-      const file = new File([audioBlob], filename, { type: mimeType });
-
-      // Upload to Vercel Blob using client upload (with timeout)
       if (!getLabToken()) {
         const err = new Error('Unlock the lab to separate stems — it runs on a paid GPU.');
         err.code = 'UNAUTHENTICATED';
@@ -349,28 +343,39 @@ export function useStemSeparation() {
       }
       const authHeaders = labAuthHeaders();
 
-      const uploadTimeout = 180000; // 3 minute timeout for upload (large audio files)
-      const uploadPromise = upload(filename, file, {
-        access: 'public',
-        handleUploadUrl: '/api/upload-audio',
-        headers: authHeaders,
-        onUploadProgress: (progressEvent) => {
-          // Upload is 5-30% of total progress
-          const uploadProgress = 5 + Math.floor((progressEvent.loaded / progressEvent.total) * 25);
-          setProgress(uploadProgress);
-        },
-      });
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Upload timed out. Please check your connection and try again.')), uploadTimeout)
-      );
-
       let blobResult;
-      try {
-        blobResult = await Promise.race([uploadPromise, timeoutPromise]);
-      } catch (uploadErr) {
-        console.error('Blob upload failed:', uploadErr);
-        throw new Error(uploadErr.message || 'Failed to upload audio file. Please try again.');
+      if (options.existingUrl && /\.public\.blob\.vercel-storage\.com/.test(options.existingUrl)) {
+        blobResult = { url: options.existingUrl };
+      } else {
+        const extension = filename.split('.').pop()?.toLowerCase() || 'mp3';
+        const mimeType = MIME_TYPES[extension] || 'audio/mpeg';
+
+        // Convert ArrayBuffer to Blob for upload
+        const audioBlob = new Blob([audioData], { type: mimeType });
+        const file = new File([audioBlob], filename, { type: mimeType });
+
+        const uploadTimeout = 180000; // 3 minute timeout for upload (large audio files)
+        const uploadPromise = upload(filename, file, {
+          access: 'public',
+          handleUploadUrl: '/api/upload-audio',
+          headers: authHeaders,
+          onUploadProgress: (progressEvent) => {
+            // Upload is 5-30% of total progress
+            const uploadProgress = 5 + Math.floor((progressEvent.loaded / progressEvent.total) * 25);
+            setProgress(uploadProgress);
+          },
+        });
+
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Upload timed out. Please check your connection and try again.')), uploadTimeout)
+        );
+
+        try {
+          blobResult = await Promise.race([uploadPromise, timeoutPromise]);
+        } catch (uploadErr) {
+          console.error('Blob upload failed:', uploadErr);
+          throw new Error(uploadErr.message || 'Failed to upload audio file. Please try again.');
+        }
       }
 
       if (!blobResult.url) {
