@@ -234,46 +234,89 @@ function detectBPM(channelData, sampleRate) {
 // Key Detection
 // =============================================================================
 
-function detectKey(channelData, sampleRate) {
+// Tuned against 117 tracks from Spencer's Rekordbox library (scripts/key-bench.mjs,
+// ground truth in scripts/key-truth.json). Leave-one-out: 64% exact / 87% usable
+// (exact, relative or ±1 Camelot) / 13% wrong — up from 46% / 65% / 35% with the
+// Krumhansl-Schmuckler profiles and the old extractor. Things that did NOT help, so
+// don't re-add them: harmonic sub-voting (f/2 is the same pitch class, f/3 pulls energy a
+// fifth down and adds neighbour errors), bigger FFT windows, bass-only chroma, per-segment
+// voting, discriminatively trained profiles.
+const KEY_DETECT_DEFAULTS = {
+  windowSize: 8192,  // 5.4 Hz bins at 44.1k — larger windows tested worse
+  loHz: 65,          // lowest peak considered (C2)
+  hiHz: 2100,        // highest peak considered
+  bassHz: 260,       // peaks below this get bassBoost
+  bassBoost: 1,
+  harmonics: 1,      // each peak votes for f/1..f/harmonics (1 = no sub-harmonic voting)
+  harmonicDecay: 0.6,
+  peakFloor: 0.02,   // fraction of the window's loudest peak
+  magPower: 0.5,     // peak weight = mag^magPower
+  silenceGate: 0.15, // skip windows quieter than this × mean energy
+  maxWindows: 200,
+  topPeaks: 12,      // only the N loudest peaks per window (0 = all above the floor)
+  tuning: true,      // estimate and fold out the track's deviation from A440
+  windowNorm: true,  // max-normalise each window's chroma before averaging
+  profiles: 'lab'
+};
+
+const KEY_PROFILES = {
+  // Learned: 75% the mean standardised chroma of the library's tracks rotated to their
+  // tonic (reflects the music — house / tech house / hip hop — and this extractor's
+  // biases, e.g. it barely sees thirds under a heavy bassline) + 25% standardised K-S,
+  // which restores enough of the third to break tonic/dominant near-ties.
+  lab: {
+    major: [1.633, -0.629, 0.214, -0.713, 0.602, -0.009, -0.621, 0.777, -0.86, 0.138, -0.652, 0.118],
+    minor: [1.81, -0.717, -0.014, 0.59, -0.752, 0.164, -0.787, 1.179, -0.147, -0.705, 0.056, -0.678]
+  },
+  ks: {
+    major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+    minor: [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+  },
+  temperley: {
+    major: [5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0],
+    minor: [5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0]
+  }
+};
+
+function detectKey(channelData, sampleRate, options = {}) {
+  const P = { ...KEY_DETECT_DEFAULTS, ...options };
   // 8192-point windows give ~5.4 Hz bins at 44.1k — enough to separate semitones down to
   // C2 (65 Hz) where the bass lives. Windows are spread evenly across the WHOLE track
   // (the previous version only looked at the first ~1.4 seconds — i.e. the intro).
-  const windowSize = 8192;
+  const windowSize = P.windowSize;
   if (channelData.length < windowSize) return null;
 
   const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const freqResolution = sampleRate / windowSize;
 
-  const maxWindows = 200;
+  const maxWindows = P.maxWindows;
   const available = Math.floor((channelData.length - windowSize) / (windowSize / 2)) + 1;
   const windowsToProcess = Math.min(available, maxWindows);
   const stride = windowsToProcess > 1 ? (channelData.length - windowSize) / (windowsToProcess - 1) : 0;
 
-  const chromaPerWindow = [];
+  // Pass 1: pick spectral peaks per window. Only PEAKS contribute (broadband drums and
+  // noise otherwise fill all twelve bins).
+  const peaksPerWindow = [];
   const windowEnergies = [];
+  const loBin = Math.ceil(P.loHz / freqResolution);
 
   for (let w = 0; w < windowsToProcess; w++) {
     const start = Math.floor(w * stride);
     const windowData = channelData.subarray(start, start + windowSize);
     const magnitudes = computeMagnitudeSpectrum(windowData, windowSize);
+    const hiBin = Math.min(magnitudes.length - 2, Math.floor(P.hiHz / freqResolution));
 
-    const chroma = new Array(12).fill(0);
-    let windowEnergy = 0;
-
-    // Harmonic pitch-class profile: only spectral PEAKS contribute (broadband drums and
-    // noise otherwise fill all twelve bins), and each peak also votes for the pitch classes
-    // of the fundamentals it could be a harmonic of (f/2, f/3, f/4) with decaying weight,
-    // which pulls energy back onto roots. The bass register gets a boost — in club music
-    // the bassline states the key.
-    const loBin = Math.ceil(65 / freqResolution);
-    const hiBin = Math.min(magnitudes.length - 2, Math.floor(2100 / freqResolution));
     let windowMax = 0;
-    for (let i = loBin; i <= hiBin; i++) if (magnitudes[i] > windowMax) windowMax = magnitudes[i];
-    const peakFloor = windowMax * 0.02;
+    let windowEnergy = 0;
+    for (let i = loBin; i <= hiBin; i++) {
+      windowEnergy += magnitudes[i];
+      if (magnitudes[i] > windowMax) windowMax = magnitudes[i];
+    }
+    const peakFloor = windowMax * P.peakFloor;
+    const peaks = [];
 
     for (let i = loBin; i <= hiBin; i++) {
       const mag = magnitudes[i];
-      windowEnergy += mag;
       if (mag < peakFloor || mag <= magnitudes[i - 1] || mag < magnitudes[i + 1]) continue;
 
       // Parabolic interpolation for a sub-bin frequency estimate
@@ -281,19 +324,58 @@ function detectKey(channelData, sampleRate) {
       const denom = a - 2 * b + c;
       const shift = denom !== 0 ? 0.5 * (a - c) / denom : 0;
       const freq = (i + shift) * freqResolution;
-
-      const weight = Math.sqrt(mag) * (freq < 260 ? 1.6 : 1);
-      for (let h = 1; h <= 4; h++) {
-        const f0 = freq / h;
-        if (f0 < 30) break;
-        const semitoneFromA = 12 * Math.log2(f0 / 440);
-        const pitchClass = (((Math.round(semitoneFromA) + 9) % 12) + 12) % 12;
-        chroma[pitchClass] += weight * Math.pow(0.6, h - 1);
-      }
+      const weight = Math.pow(mag, P.magPower) * (freq < P.bassHz ? P.bassBoost : 1);
+      peaks.push({ freq, weight });
     }
 
-    chromaPerWindow.push(chroma);
+    if (P.topPeaks > 0 && peaks.length > P.topPeaks) {
+      peaks.sort((a, b) => b.weight - a.weight);
+      peaks.length = P.topPeaks;
+    }
+    peaksPerWindow.push(peaks);
     windowEnergies.push(windowEnergy);
+  }
+
+  // Tuning: old records, pitched edits and vinyl rips aren't at A440. Find the dominant
+  // fractional-semitone offset of all peaks (circular mean) and fold it out before
+  // binning, so a track 40 cents flat doesn't smear every note across two bins.
+  let tuningOffset = 0;
+  if (P.tuning) {
+    let sx = 0, sy = 0;
+    for (const peaks of peaksPerWindow) {
+      for (const { freq, weight } of peaks) {
+        const dev = 12 * Math.log2(freq / 440);
+        const frac = dev - Math.round(dev); // [-0.5, 0.5)
+        sx += weight * Math.cos(2 * Math.PI * frac);
+        sy += weight * Math.sin(2 * Math.PI * frac);
+      }
+    }
+    if (sx !== 0 || sy !== 0) tuningOffset = Math.atan2(sy, sx) / (2 * Math.PI);
+  }
+
+  // Pass 2: harmonic pitch-class profile. Each peak votes for the pitch class of the
+  // fundamentals it could be a harmonic of (f/1..f/harmonics) with decaying weight, which
+  // pulls energy back onto roots. The bass register gets a boost — in club music the
+  // bassline states the key.
+  const chromaPerWindow = [];
+  const normalise = (chroma) => {
+    if (!P.windowNorm) return chroma;
+    const m = Math.max(...chroma);
+    if (m > 0) for (let j = 0; j < 12; j++) chroma[j] /= m;
+    return chroma;
+  };
+  for (const peaks of peaksPerWindow) {
+    const chroma = new Array(12).fill(0);
+    for (const { freq, weight } of peaks) {
+      for (let h = 1; h <= P.harmonics; h++) {
+        const f0 = freq / h;
+        if (f0 < 30) break;
+        const semitoneFromA = 12 * Math.log2(f0 / 440) - tuningOffset;
+        const pitchClass = (((Math.round(semitoneFromA) + 9) % 12) + 12) % 12;
+        chroma[pitchClass] += weight * Math.pow(P.harmonicDecay, h - 1);
+      }
+    }
+    chromaPerWindow.push(normalise(chroma));
   }
 
   // Skip near-silent windows (intros/outros) so they don't dilute the estimate
@@ -301,7 +383,7 @@ function detectKey(channelData, sampleRate) {
   const avgChroma = new Array(12).fill(0);
   let used = 0;
   for (let i = 0; i < chromaPerWindow.length; i++) {
-    if (windowEnergies[i] < meanEnergy * 0.15) continue;
+    if (windowEnergies[i] < meanEnergy * P.silenceGate) continue;
     for (let j = 0; j < 12; j++) avgChroma[j] += chromaPerWindow[i][j];
     used++;
   }
@@ -310,9 +392,13 @@ function detectKey(channelData, sampleRate) {
   const maxChroma = Math.max(...avgChroma);
   const normalizedChroma = avgChroma.map(c => maxChroma > 0 ? c / maxChroma : 0);
 
-  // Krumhansl-Schmuckler key profiles (index 0 = tonic)
-  const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-  const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+  // Key profiles (index 0 = tonic). 'ks' = Krumhansl-Schmuckler probe-tone ratings;
+  // 'temperley' = Temperley's Bayesian profiles; custom profiles can be passed in options.
+  const profileSet = P.majorProfile && P.minorProfile
+    ? { major: P.majorProfile, minor: P.minorProfile }
+    : KEY_PROFILES[P.profiles] || KEY_PROFILES.ks;
+  const majorProfile = profileSet.major;
+  const minorProfile = profileSet.minor;
 
   // Pearson correlation
   const correlate = (a, b) => {
@@ -341,10 +427,12 @@ function detectKey(channelData, sampleRate) {
 
   const bestKey = candidates[0];
   const bestCorr = bestKey.corr;
-  // Confidence blends absolute fit with the margin over the runner-up. A clear key gives
-  // ~0.8+ correlation and a decent gap; ambiguous material collapses towards 50.
+  // Confidence is driven by the absolute fit: on the benchmark, correlation < 0.7 was
+  // usable only ~half the time, ≥ 0.7 about 90%. The margin over the runner-up adds
+  // little (the runner-up is usually the relative or neighbouring key, which still
+  // transposes cleanly), so it only nudges.
   const margin = bestCorr - candidates[1].corr;
-  const confidence = Math.max(0, Math.min(100, Math.round(50 + bestCorr * 35 + margin * 150)));
+  const confidence = Math.max(0, Math.min(100, Math.round(-40 + bestCorr * 140 + Math.min(10, margin * 50))));
   const alternatives = candidates.slice(1, 4).map(c => ({ key: c.note, mode: c.mode, corr: Math.round(c.corr * 100) / 100 }));
 
   // Generate scale notes
@@ -393,7 +481,9 @@ function detectKey(channelData, sampleRate) {
     confidence,
     alternatives,
     compatibleKeys,
-    chroma: noteNames.map((note, i) => ({ note, value: normalizedChroma[i] }))
+    chroma: noteNames.map((note, i) => ({ note, value: normalizedChroma[i] })),
+    windows: P.debugWindows ? chromaPerWindow.map((c, i) => ({ c, e: windowEnergies[i] / meanEnergy })) : undefined,
+    tuningCents: Math.round(tuningOffset * 100)
   };
 }
 
@@ -2819,36 +2909,55 @@ self.onmessage = function(e) {
 
       case 'GENERATE_WAVEFORM_COLORS': {
         // Signal Deck: colour the waveform by frequency content. For each of N columns
-        // across the track, take a 2048-sample Hann-windowed FFT and compute the spectral
-        // centroid; map it onto [0,1] with a log scale from 40 Hz to 12 kHz (matches
-        // utils/spectrum.js hzToSpectrumT). Returns a Float32Array of t values.
+        // across the track, average the spectral centroid over several 2048-sample FFTs
+        // spanning that column (not one 46 ms snapshot, which flips hue on every hat),
+        // then smooth with a ~1.2 s moving average so colour follows sections rather than
+        // beats. Mapped onto [0,1] with a log scale from 120 Hz to 8 kHz — the range a full
+        // mix's centroid actually covers (filtered breakdown → blue, open drop → yellow).
+        // Returns a Float32Array of t values (-1 = silence).
         const channelData = new Float32Array(payload.channelData);
         const sampleRate = payload.sampleRate;
         const numColumns = Math.max(16, Math.min(2048, payload.numColumns || 512));
         const win = 2048;
         const total = channelData.length;
-        const out = new Float32Array(numColumns);
+        const raw = new Float32Array(numColumns);
         const binHz = sampleRate / win;
-        const lo = Math.log10(40), hi = Math.log10(12000);
+        const lo = Math.log10(120), hi = Math.log10(8000);
         const slice = new Float32Array(win);
+        const maxBin = Math.min(win / 2, Math.floor(16000 / binHz));
+        const span = total / numColumns;
+        const fftsPerColumn = Math.max(1, Math.min(6, Math.floor(span / win)));
         for (let c = 0; c < numColumns; c++) {
-          const center = Math.floor(((c + 0.5) / numColumns) * total);
-          const start = Math.max(0, Math.min(total - win, center - win / 2));
-          slice.fill(0);
-          slice.set(channelData.subarray(start, Math.min(total, start + win)));
-          const mags = computeMagnitudeSpectrum(slice, win);
           let num = 0, den = 0;
-          // skip DC and anything above 16 kHz — cymbal sizzle shouldn't drag the centroid
-          const maxBin = Math.min(mags.length, Math.floor(16000 / binHz));
-          for (let b = 1; b < maxBin; b++) {
-            const m = mags[b];
-            num += m * b * binHz;
-            den += m;
+          for (let k = 0; k < fftsPerColumn; k++) {
+            const center = Math.floor((c + (k + 0.5) / fftsPerColumn) * span);
+            const start = Math.max(0, Math.min(total - win, center - win / 2));
+            slice.fill(0);
+            slice.set(channelData.subarray(start, Math.min(total, start + win)));
+            const mags = computeMagnitudeSpectrum(slice, win);
+            // skip DC and anything above 16 kHz — cymbal sizzle shouldn't drag the centroid
+            for (let b = 1; b < maxBin; b++) {
+              const m = mags[b];
+              num += m * b * binHz;
+              den += m;
+            }
           }
-          const centroid = den > 1e-6 ? num / den : 0;
-          out[c] = centroid > 0
-            ? Math.min(1, Math.max(0, (Math.log10(centroid) - lo) / (hi - lo)))
-            : -1; // -1 = silence, renderer falls back to neutral
+          const centroid = den > 1e-6 * fftsPerColumn ? num / den : 0;
+          raw[c] = centroid > 0 ? Math.log10(centroid) : NaN;
+        }
+        // Moving average over ~1.2 s of columns (silent columns don't contribute)
+        const durationSec = total / sampleRate;
+        const radius = Math.max(1, Math.round((0.6 / durationSec) * numColumns));
+        const out = new Float32Array(numColumns);
+        for (let c = 0; c < numColumns; c++) {
+          if (Number.isNaN(raw[c])) { out[c] = -1; continue; }
+          let sum = 0, n = 0;
+          for (let j = Math.max(0, c - radius); j <= Math.min(numColumns - 1, c + radius); j++) {
+            if (Number.isNaN(raw[j])) continue;
+            sum += raw[j];
+            n++;
+          }
+          out[c] = Math.min(1, Math.max(0, (sum / n - lo) / (hi - lo)));
         }
         self.postMessage({ type: 'SUCCESS', id, result: { colors: out.buffer, numColumns } }, [out.buffer]);
         return;

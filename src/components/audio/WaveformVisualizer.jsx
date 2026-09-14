@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { spectrumColor } from '../../utils/spectrum';
+import { spectrumColor, spectrumRgb } from '../../utils/spectrum';
+
+/** How much spectrum colour shows through on the unplayed waveform (0 = plain grey) */
+const UNPLAYED_SPECTRUM_MIX = 0.35;
 import { ZoomIn, ZoomOut, Repeat, X, RotateCcw, Scissors } from 'lucide-react';
 
 // Zoom snap levels for button controls
@@ -90,6 +93,9 @@ export function WaveformVisualizer({
   // === Signal Deck colouring ===
   // Colour for the column at absolute time tAbs. Quantised to 32 levels and cached so the
   // 60fps overlay doesn't build strings every frame. Returns a neutral when no colour data.
+  // The played portion carries the full spectrum colour; unplayed columns are pulled most
+  // of the way towards the neutral waveform grey so the track's shape is hinted at without
+  // the whole strip lighting up — colour is something you reveal by playing.
   const colorCacheRef = useRef(new Map());
   const columnColor = useCallback((tAbs, alpha, neutral) => {
     const map = waveformColorRef?.current;
@@ -98,10 +104,19 @@ export function WaveformVisualizer({
     const v = map.colors[idx];
     if (v < 0) return neutral;
     const q = Math.round(v * 31);
-    const key = q * 4 + (alpha >= 1 ? 3 : alpha >= 0.6 ? 2 : 1);
+    const played = alpha >= 1;
+    const key = `${q}:${played ? 'p' : 'u'}:${neutral}`;
     let c = colorCacheRef.current.get(key);
     if (!c) {
-      c = spectrumColor(q / 31, alpha);
+      if (played) {
+        c = spectrumColor(q / 31, 1);
+      } else {
+        const [r, g, b] = spectrumRgb(q / 31);
+        const n = parseInt(neutral.slice(1), 16);
+        const nr = (n >> 16) & 255, ng = (n >> 8) & 255, nb = n & 255;
+        const mix = UNPLAYED_SPECTRUM_MIX;
+        c = `rgba(${Math.round(nr + (r - nr) * mix)}, ${Math.round(ng + (g - ng) * mix)}, ${Math.round(nb + (b - nb) * mix)}, ${alpha})`;
+      }
       colorCacheRef.current.set(key, c);
     }
     return c;
@@ -212,8 +227,9 @@ export function WaveformVisualizer({
 
     const visStart = getVisibleStart();
     const visDur = getVisibleDuration();
-    // Unplayed waveform sits at ~55% so the played portion (full colour) reads as progress
-    const dimAlpha = theme === 'dark' ? 0.55 : 0.7;
+    // Unplayed waveform is mostly neutral grey with a hint of spectrum colour; the played
+    // portion (full colour, drawn in the overlay) reads as progress
+    const dimAlpha = theme === 'dark' ? 0.9 : 0.95;
     const colorAt = (px) => columnColor(visStart + ((px + 0.5) / width) * visDur, dimAlpha, colors.waveform);
 
     if (hiRes && hiRes.numBlocks > 0) {
