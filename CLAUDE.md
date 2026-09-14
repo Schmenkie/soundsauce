@@ -17,7 +17,7 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 
 ## Where Things Stand (handoff — updated 2026-09-14)
 
-**Deployed**: production at https://www.soundsauce.app runs commit `3197a75` (Vault + Calculator + Signal Deck + key fix). Everything after that in `### Completed` is local until the next `vercel build --prod && vercel deploy --prebuilt --prod`. Vercel CLI login is valid (`scurnow24-2856`).
+**Deployed**: production at https://www.soundsauce.app runs commit `9bd3d28` (everything through the paste-a-link UX pass). Working tree is clean. Vercel CLI login is valid (`scurnow24-2856`). Deploy with `vercel build --prod && vercel deploy --prebuilt --prod`.
 
 **Daily workflow that works today**: run `npm run helper` (or install it once with `npm run helper:install`) → open the Lab → Cmd+V a YouTube/SoundCloud link → FLAC lands in the Lab and in `~/Music/Remix Lab/Sources/` → Grab Vocals → stems auto-keep to Blob and the track appears in `/vault` → `/calc` tells you transpose/tempo for your project.
 
@@ -25,7 +25,22 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 - Frequency-coloured waveforms "look like garbage" — keep the colour-is-frequency idea but calm it down (fewer hue changes, smoother mapping, or colour only the played portion). Not started.
 - Key detection must be right — verified on one track (Bb minor). Spot-check more with `scripts/key-check.mjs`.
 
-**Next in the roadmap**: Stem Player + Arrangement Map → Anatomy → Remix Notes. Compatibility Finder already exists inside the Vault ("mixes with").
+**Next session — the agreed queue** (Spencer approved this order on 2026-09-14; start at the top):
+
+1. **Waveform colouring rework** (small) — current per-column spectral-centroid colouring reads as noise. Options: colour by section energy with 2–3 hues; or one neutral hue for unplayed + spectrum only on the played portion; or a smoothed centroid (moving average over ~1 s) with a narrower hue range. Keep "colour is frequency" as the idea, lose the confetti. Files: `WaveformVisualizer.jsx` (`columnColor`, `strokeColumns`), worker `GENERATE_WAVEFORM_COLORS`.
+2. **Key confidence hardening** (small, high value) — batch-run `scripts/key-check.mjs` over `~/Desktop/Mixing Mersic/*.mp3` (~15 tracks) and compare against known keys (Spencer knows them / Rekordbox has them). Tune `detectKey` weights (bass boost, harmonic decay, peak floor) until it's reliable. The calculator depends on it.
+3. **Stem Player + Arrangement Map** (medium) — synced mute/solo of all stems (multiple `AudioBufferSourceNode`s from `stemAudioData`), stacked colour-coded stem waveforms with a bar grid from BPM. Stem waveform data is already cached per stem in `Analyze.jsx` (`stemWaveformDataRef`). This is the "understand the original" step.
+4. **Production add-ons Spencer liked** (each small–medium):
+   - **Helper menubar app** — status icon (green = yt-dlp + ffmpeg healthy), "Open Sources folder", "Update yt-dlp" (`brew upgrade yt-dlp`), start/stop. Python `rumps` is the cheap route since yt-dlp already brings Python; keep `remix-helper.mjs` as the server and have the menubar app just supervise it.
+   - **Write into Live's browser** — helper endpoint that unpacks a Remix Pack straight into `~/Music/Remix Lab/Stems/<Artist - Title>/` (and the Vault's "pack" button offers "save to Sources" when the helper is online). Add `~/Music/Remix Lab/` to Live → Places once.
+   - **Batch grab** — paste a SoundCloud set / YouTube playlist → queue of vocal grabs. Helper `/resolve` already returns playlist entries; needs a queue UI in `LinkImport` and sequential `grab()` + `separateStems()`.
+   - **Blob budget in Settings** — surface `vault.storage` as "356 MB used · ~12 more tracks fit" (≈55 MB per two-stem grab).
+5. **Vocal chop kit** (medium) — onset-detect the vocal stem, slice at phrase gaps, export chops (folder or zip) with stamped names.
+6. **Anatomy of a Track** (medium) — per-stem analysis presented as a study guide; restyle the post-analysis step flow to Signal Deck while in there.
+7. **Remix Notes** (medium) — journal per vault track + public page.
+8. **Vault polish** — inline edit title/artist, tags, "re-separate as 4-stem", bulk Keep.
+
+Fun ideas parked for later: mashup preview in-browser (vocal A over instrumental B, calculator math applied live), Vault as a Camelot wheel, reference A/B, `.als` generation.
 
 **Gotchas for whoever picks this up**
 - The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`).
