@@ -17,7 +17,7 @@ It started life as a community "learn to recreate any sound" platform (Discover,
 
 ## Where Things Stand (handoff — updated 2026-09-14, end of session)
 
-**Deployed**: production at https://www.soundsauce.app still runs commit `9bd3d28`. **Everything in this session (the whole 8-item queue) is committed locally but not deployed** — run `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` is valid). On the Mac, run `npm run menubar:install` once: it puts the 🟢 status dot in the menu bar and (re)starts the helper with the new `/stems` endpoints.
+**Deployed**: production at https://www.soundsauce.app runs commit `73410f8` (deployed 2026-09-14, the whole 8-item queue). Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` is valid). On the Mac, run `npm run menubar:install` once: it puts the 🟢 status dot in the menu bar and (re)starts the helper with the new `/stems` endpoints.
 
 **Daily workflow now**: menubar dot green → Lab → Cmd+V a link (or a set/playlist → tick → "Grab vocals from N") → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → Grab Vocals → auto-kept, in `/vault` → **To Live** drops stems into `~/Music/Remix Lab/Stems/<Artist - Title>/` → **Stem Player** to solo/mute/loop bars, **Anatomy** for structure + chords, **Vocal Chops** → chops folder → `/calc` for transpose/tempo → `/notes` to write it up (tick "public" to show it on the portfolio page).
 
