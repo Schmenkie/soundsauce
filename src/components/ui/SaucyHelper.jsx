@@ -1,37 +1,26 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { X, ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
-
-/**
- * Contextual tips keyed by route pathname.
- * Each route has an array of { title, tip } objects.
- */
-const ROUTE_TIPS = {
-  '/': [
-    { title: 'Drop a Track', tip: 'Drag in any WAV, MP3, or M4A. Tempo and key show up in the header as soon as it decodes.' },
-    { title: 'Grab Vocals', tip: 'Vocals + Instrumental is the remix default — two lossless FLACs stamped with BPM and key, ready for Live.' },
-    { title: 'Keep What Matters', tip: 'Unkept stems expire from Replicate after ~7 days. Hit Keep (or Keep all) to store them permanently.' },
-    { title: 'Remix Pack', tip: 'Downloads every stem plus notes.txt with tempo, key, Camelot neighbours and Ableton warp tips.' },
-    { title: 'Select a Region', tip: 'Drag on the waveform to highlight a section. Analyzing a short, isolated region gives much more accurate results.' },
-    { title: 'Keyboard Shortcuts', tip: 'Space to play/pause, L to toggle loop, Esc to clear selection, arrow keys to skip.' },
-  ],
-  '/vault': [
-    { title: 'Your Crate', tip: 'Every track you separate lands here with its stems, tempo and key. Kept stems never expire.' },
-    { title: 'Mixes With', tip: 'Hit the link icon on a track to see everything in a compatible key (Camelot neighbours) and tempo.' },
-    { title: 'Free Space', tip: 'Removing a track deletes its stems and source upload — the storage bar at the top shows the 1 GB budget.' },
-  ],
-  '/calc': [
-    { title: 'Zero Is Best', tip: 'A green 0 st means the vocal already fits — the relative major/minor shares the same notes.' },
-    { title: 'Under 10%', tip: 'Tempo stretches under ~10% stay clean in Complex Pro. Past that, try a half/double-time reading or Re-Pitch.' },
-    { title: 'Remembered', tip: 'The project side is saved between visits — set it once per session.' },
-  ],
-  '/settings': [
-    { title: 'Set Your DAW', tip: 'Choose your DAW to get tailored plugin recommendations in every recipe.' },
-    { title: 'Lock the Lab', tip: 'Separation and uploads cost money, so they sit behind the lab password.' },
-  ],
-};
+import { X, ChevronLeft, ChevronRight, ChevronDown, Lightbulb, BookOpen, Search } from 'lucide-react';
+import { GUIDE, COSTS, COST_SUMMARY } from '../../data/helperGuide';
 
 const SEEN_KEY = 'soundsauce_helper_seen_routes';
+
+const COST_STYLE = {
+  free: 'text-[#34D399] border-[#34D399]/40',
+  gpu: 'text-[#EF4444] border-[#EF4444]/40',
+  blob: 'text-[#8B5CF6] border-[#8B5CF6]/40',
+  disk: 'text-[#3B82F6] border-[#3B82F6]/40',
+  download: 'text-[#FACC15] border-[#FACC15]/40',
+};
+
+function CostTag({ cost }) {
+  const c = COSTS[cost] || COSTS.free;
+  return (
+    <span className={`inline-flex items-center h-4 px-1.5 rounded border font-mono text-[9px] uppercase tracking-wider whitespace-nowrap ${COST_STYLE[cost] || COST_STYLE.free}`} title={c.hint}>
+      {c.label}
+    </span>
+  );
+}
 
 /**
  * SaucyHelper — A floating contextual tip mascot.
@@ -44,16 +33,38 @@ export function SaucyHelper({ theme }) {
   const [isOpen, setIsOpen] = useState(false);
   const [tipIndex, setTipIndex] = useState(0);
   const [hasNewTip, setHasNewTip] = useState(false);
+  const [mode, setMode] = useState('tips'); // 'tips' | 'guide'
+  const [query, setQuery] = useState('');
+  const [openSection, setOpenSection] = useState(0);
   const popoverRef = useRef(null);
 
-  // Get tips for current route (exact match or fallback to generic)
+  // Get tips + guide for current route (exact match or fallback to the Lab)
   const routePath = location.pathname;
-  const tips = ROUTE_TIPS[routePath] || ROUTE_TIPS['/'];
+  const page = GUIDE[routePath] || GUIDE['/'];
+  const tips = page.tips;
+  const sections = page.sections;
+
+  // Search across every page's controls, not just this one
+  const searchHits = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return null;
+    const hits = [];
+    for (const [route, pg] of Object.entries(GUIDE)) {
+      for (const sec of pg.sections) {
+        for (const item of sec.items) {
+          if (`${item.name} ${item.what} ${sec.title}`.toLowerCase().includes(q)) hits.push({ ...item, section: sec.title, route });
+        }
+      }
+    }
+    return hits.slice(0, 20);
+  }, [query]);
 
   // Reset tip index and check if this route has unseen tips
   useEffect(() => {
     setTipIndex(0);
     setIsOpen(false);
+    setQuery('');
+    setOpenSection(0);
     try {
       const seen = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
       if (!seen[routePath]) {
@@ -107,7 +118,7 @@ export function SaucyHelper({ theme }) {
       {/* Tip Popover */}
       {isOpen && (
         <div
-          className={`absolute bottom-16 right-0 w-72 rounded-xl border shadow-xl backdrop-blur-sm transition-all ${
+          className={`absolute bottom-16 right-0 ${mode === 'guide' ? 'w-[380px]' : 'w-72'} rounded-xl border shadow-xl backdrop-blur-sm transition-all ${
             isDark
               ? 'bg-zinc-900/95 border-zinc-700 shadow-black/40'
               : 'bg-white/95 border-stone-200 shadow-stone-300/30'
@@ -117,12 +128,23 @@ export function SaucyHelper({ theme }) {
           }}
         >
           {/* Header */}
-          <div className={`flex items-center justify-between px-4 pt-3 pb-1`}>
-            <div className="flex items-center gap-2">
-              <Lightbulb className={`w-3.5 h-3.5 ${isDark ? 'text-ember-500' : 'text-ember-600'}`} />
-              <span className={`text-xs font-medium ${isDark ? 'text-zinc-500' : 'text-stone-400'}`}>
-                Quick Tip
-              </span>
+          <div className="flex items-center justify-between px-4 pt-3 pb-2">
+            <div className={`flex items-center rounded-md border overflow-hidden ${isDark ? 'border-zinc-700' : 'border-stone-200'}`} role="tablist">
+              {[['tips', Lightbulb, 'Tips'], ['guide', BookOpen, 'What does this do?']].map(([id, Icon, label]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={mode === id}
+                  onClick={() => setMode(id)}
+                  className={`flex items-center gap-1.5 px-2.5 h-7 text-[11px] font-medium transition-colors ${
+                    mode === id
+                      ? isDark ? 'bg-ember-500 text-[#1A1400]' : 'bg-ember-600 text-white'
+                      : isDark ? 'text-zinc-400 hover:text-zinc-100' : 'text-stone-500 hover:text-stone-900'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" /> {label}
+                </button>
+              ))}
             </div>
             <button
               onClick={() => setIsOpen(false)}
@@ -136,48 +158,125 @@ export function SaucyHelper({ theme }) {
             </button>
           </div>
 
-          {/* Tip Content */}
-          <div className="px-4 py-2">
-            <p className={`text-sm font-medium mb-1 ${isDark ? 'text-zinc-100' : 'text-stone-800'}`}>
-              {currentTip.title}
-            </p>
-            <p className={`text-xs leading-relaxed ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>
-              {currentTip.tip}
-            </p>
-          </div>
+          {mode === 'tips' ? (
+            <>
+              {/* Tip Content */}
+              <div className="px-4 py-2">
+                <p className={`text-sm font-medium mb-1 ${isDark ? 'text-zinc-100' : 'text-stone-800'}`}>
+                  {currentTip.title}
+                </p>
+                <p className={`text-xs leading-relaxed ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>
+                  {currentTip.tip}
+                </p>
+              </div>
 
-          {/* Footer Navigation */}
-          <div className={`flex items-center justify-between px-4 pb-3 pt-1`}>
-            <span className={`text-[10px] font-medium ${isDark ? 'text-zinc-600' : 'text-stone-300'}`}>
-              {tipIndex + 1} / {tips.length}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => hasPrev && setTipIndex(tipIndex - 1)}
-                disabled={!hasPrev}
-                className={`p-1.5 rounded-md transition-colors ${
-                  hasPrev
-                    ? isDark ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-stone-100 text-stone-500'
-                    : isDark ? 'text-zinc-700 cursor-default' : 'text-stone-200 cursor-default'
-                }`}
-                aria-label="Previous tip"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => hasNext && setTipIndex(tipIndex + 1)}
-                disabled={!hasNext}
-                className={`p-1.5 rounded-md transition-colors ${
-                  hasNext
-                    ? isDark ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-stone-100 text-stone-500'
-                    : isDark ? 'text-zinc-700 cursor-default' : 'text-stone-200 cursor-default'
-                }`}
-                aria-label="Next tip"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+              {/* Footer Navigation */}
+              <div className="flex items-center justify-between px-4 pb-3 pt-1">
+                <span className={`text-[10px] font-medium ${isDark ? 'text-zinc-600' : 'text-stone-300'}`}>
+                  {tipIndex + 1} / {tips.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => hasPrev && setTipIndex(tipIndex - 1)}
+                    disabled={!hasPrev}
+                    className={`p-1.5 rounded-md transition-colors ${
+                      hasPrev
+                        ? isDark ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-stone-100 text-stone-500'
+                        : isDark ? 'text-zinc-700 cursor-default' : 'text-stone-200 cursor-default'
+                    }`}
+                    aria-label="Previous tip"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => hasNext && setTipIndex(tipIndex + 1)}
+                    disabled={!hasNext}
+                    className={`p-1.5 rounded-md transition-colors ${
+                      hasNext
+                        ? isDark ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-stone-100 text-stone-500'
+                        : isDark ? 'text-zinc-700 cursor-default' : 'text-stone-200 cursor-default'
+                    }`}
+                    aria-label="Next tip"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col" style={{ maxHeight: '70vh' }}>
+              {/* Search */}
+              <div className={`mx-4 mb-2 flex items-center gap-2 px-2.5 rounded-md border ${isDark ? 'bg-zinc-950 border-zinc-700' : 'bg-stone-50 border-stone-200'}`}>
+                <Search className={`w-3 h-3 ${isDark ? 'text-zinc-500' : 'text-stone-400'}`} />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="find a button… e.g. remix pack, keep, to live"
+                  aria-label="Search the guide"
+                  className={`flex-1 py-1.5 bg-transparent text-[12px] outline-none ${isDark ? 'text-zinc-100 placeholder:text-zinc-600' : 'text-stone-900 placeholder:text-stone-400'}`}
+                />
+                {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear" className={isDark ? 'text-zinc-500' : 'text-stone-400'}><X className="w-3 h-3" /></button>}
+              </div>
+
+              {/* Cost legend */}
+              <div className="px-4 pb-2 flex flex-wrap gap-1">
+                {Object.keys(COSTS).map(c => <CostTag key={c} cost={c} />)}
+              </div>
+
+              <div className="overflow-y-auto px-2 pb-3">
+                {searchHits ? (
+                  searchHits.length === 0 ? (
+                    <p className={`px-2 py-3 text-xs ${isDark ? 'text-zinc-500' : 'text-stone-400'}`}>Nothing matches — try another word.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {searchHits.map((item, i) => (
+                        <li key={i} className={`px-2 py-1.5 rounded-md ${isDark ? 'hover:bg-zinc-800/60' : 'hover:bg-stone-100'}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[12px] font-medium ${isDark ? 'text-zinc-100' : 'text-stone-800'}`}>{item.name}</span>
+                            <CostTag cost={item.cost} />
+                          </div>
+                          <p className={`text-[11px] leading-relaxed mt-0.5 ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>{item.what}</p>
+                          <p className={`text-[10px] mt-0.5 ${isDark ? 'text-zinc-600' : 'text-stone-400'}`}>{item.route === '/' ? 'Lab' : item.route.slice(1)} · {item.section}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                ) : (
+                  <div className="space-y-1">
+                    {[...sections, { title: 'What costs what', summary: true }].map((sec, i) => {
+                      const open = openSection === i;
+                      return (
+                        <div key={sec.title}>
+                          <button
+                            type="button"
+                            onClick={() => setOpenSection(open ? -1 : i)}
+                            aria-expanded={open}
+                            className={`w-full flex items-center justify-between px-2 py-1.5 rounded-md text-left text-[12px] font-medium ${isDark ? 'text-zinc-100 hover:bg-zinc-800/60' : 'text-stone-800 hover:bg-stone-100'}`}
+                          >
+                            {sec.title}
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''} ${isDark ? 'text-zinc-500' : 'text-stone-400'}`} />
+                          </button>
+                          {open && (
+                            <ul className="pb-1">
+                              {(sec.summary ? COST_SUMMARY : sec.items).map((item, j) => (
+                                <li key={j} className="px-2 py-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className={`text-[12px] ${sec.summary ? 'font-mono uppercase text-[10px]' : 'font-medium'} ${isDark ? 'text-zinc-100' : 'text-stone-800'}`}>{sec.summary ? COSTS[item.cost].label : item.name}</span>
+                                    {!sec.summary && <CostTag cost={item.cost} />}
+                                  </div>
+                                  <p className={`text-[11px] leading-relaxed mt-0.5 ${isDark ? 'text-zinc-400' : 'text-stone-500'}`}>{sec.summary ? item.text : item.what}</p>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Arrow pointing to button */}
           <div className={`absolute -bottom-2 right-5 w-4 h-4 rotate-45 border-r border-b ${

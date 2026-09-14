@@ -128,7 +128,8 @@ audio-analyzer-pro/
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes
 │   │   ├── constants.js, recommendations.js, demoSoundGenerator.js, validateEnv.js
-│   ├── data/                    # vitalPresets.js, vitalInitTemplate.json, dawPlugins.js, flStudioPlugins.js
+│   ├── data/                    # vitalPresets.js, vitalInitTemplate.json, dawPlugins.js, flStudioPlugins.js,
+│   │                            # helperGuide.js (the floating helper's manual: every button per page + its cost tag — keep it in sync with UI changes)
 │   ├── services/vitalPresetGenerator.js
 │   └── workers/audio.worker.js  # All heavy DSP
 ├── .claude/launch.json          # "dev" (Vite only) and "full" (Vite + dev-api) preview configs
@@ -456,6 +457,8 @@ Core loop: *find a track → pull the vocal → understand the original → remi
 - `e2e/smoke.spec.js` doesn't cover `/notes` or the Stem Player yet.
 
 ## Completed
+
+- [x] **Helper manual** (Sep 14 2026) — `SaucyHelper` now has a "What does this do?" tab: searchable, per-page accordion of every control with a cost tag (free / GPU $ / blob / disk / download) and a "What costs what" summary. Content lives in `src/data/helperGuide.js` — **update it when adding or renaming a button.** Also: DRM-protected SoundCloud links fall back to a name search (YouTube usually has the track); the offline card explains Chrome's local-network permission.
 
 - [x] **Queue items 5–8** (Sep 14 2026, same session)
   - **Vocal chop kit** — `src/utils/vocalChops.js` (+6 tests), `VocalChopKit.jsx`, helper `PUT /stems/:folder/:name`, `helperPutFile()`, `useStemPlayer.getBuffer()`. Verified: 32 stereo WAVs into `…/chops/`.
