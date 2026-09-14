@@ -19,6 +19,8 @@
  *   GET  /files/:id/thumb   -> cover art (image/jpeg)
  *   POST /stems {folder, files:[{name,url}], notes}
  *                           -> { dir, files }     download stems into ~/Music/Remix Lab/Stems/<folder>/
+ *   PUT  /stems/:folder/:name  (raw body)
+ *                           -> { path }           write bytes the browser already has (vocal chops)
  *
  * Finished files are also copied to ~/Music/Remix Lab/Sources/ (and stems land in
  * ~/Music/Remix Lab/Stems/) so they show up in Live's browser once ~/Music/Remix Lab
@@ -85,6 +87,20 @@ function readBody(req) {
       catch { resolve({}); }
     });
     req.on('error', () => resolve({}));
+  });
+}
+
+function readRawBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) { reject(new Error('Body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
   });
 }
 
@@ -388,7 +404,7 @@ function cors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   // Chrome's Private Network Access preflight for https -> localhost
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -473,6 +489,21 @@ const server = http.createServer(async (req, res) => {
       if (!target || !isUrl(target)) return json(res, 400, { error: 'A YouTube or SoundCloud URL is required' });
       const job = startJob(target);
       return json(res, 202, { id: job.id });
+    }
+
+    let sm = p.match(/^\/stems\/([^/]+)\/([^/]+)$/);
+    if (req.method === 'PUT' && sm) {
+      const folderName = sanitizeForFilename(decodeURIComponent(sm[1])).trim();
+      const name = sanitizeForFilename(decodeURIComponent(sm[2])).trim();
+      if (!folderName || !name) return json(res, 400, { error: 'folder and name required' });
+      const sub = (url.searchParams.get('sub') || '').replace(/[^\w -]/g, '').trim();
+      const dir = path.join(STEMS_DIR, folderName, sub);
+      fs.mkdirSync(dir, { recursive: true });
+      const bytes = await readRawBody(req, 200 * 1024 * 1024);
+      const dest = path.join(dir, name);
+      await fs.promises.writeFile(dest, bytes);
+      log(`file saved: ${path.relative(STEMS_DIR, dest)}`);
+      return json(res, 200, { path: dest });
     }
 
     if (req.method === 'POST' && p === '/stems') {

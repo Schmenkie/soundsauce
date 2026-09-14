@@ -204,6 +204,9 @@ export function useStemPlayer({ stemTypes, getStemAudio, onPlay }) {
 
   const clearMix = useCallback(() => { setMuted({}); setSoloed({}); }, []);
 
+  /** Decoded AudioBuffer for a stem (null until loaded) — used by the chop kit */
+  const getBuffer = useCallback((type) => buffersRef.current[type] || null, []);
+
   /** Set (or clear with null) a loop region; restarts sources if playing so the loop takes */
   const setLoopRegion = useCallback((region) => {
     const next = region && region.end - region.start > 0.05 ? region : null;
@@ -257,7 +260,7 @@ export function useStemPlayer({ stemTypes, getStemAudio, onPlay }) {
   return {
     status, error, isPlaying, duration, muted, soloed, loop, waveforms,
     positionRef,
-    load, play, pause, togglePlay, seek, toggleMute, toggleSolo, clearMix, setLoopRegion,
+    load, play, pause, togglePlay, seek, toggleMute, toggleSolo, clearMix, setLoopRegion, getBuffer,
   };
 }
 
