@@ -13,29 +13,13 @@
  */
 
 import { put, list, del } from '@vercel/blob';
+import { INDEX_PATH, readIndex } from './_vaultIndex.js';
 import { rateLimit } from './_rateLimit.js';
 import { validateServerEnv } from './_validateEnv.js';
 import { requireLab } from './_auth.js';
 
-const INDEX_PATH = 'vault/index.json';
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
 const MAX_TRACKS = 2000;
-
-async function findIndexUrl() {
-  const { blobs } = await list({ prefix: INDEX_PATH, limit: 5 });
-  const exact = blobs.find(b => b.pathname === INDEX_PATH) || blobs[0];
-  return exact?.url || null;
-}
-
-async function readIndex() {
-  const url = await findIndexUrl();
-  if (!url) return { tracks: [], updatedAt: null };
-  // Blob CDN caches aggressively; bust it so we always see the latest write
-  const res = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Failed to read vault index (${res.status})`);
-  const data = await res.json();
-  return { tracks: Array.isArray(data.tracks) ? data.tracks : [], updatedAt: data.updatedAt || null };
-}
 
 async function storageSummary() {
   let cursor, usedBytes = 0, blobCount = 0;

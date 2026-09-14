@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput } from 'lucide-react';
+import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput, NotebookPen } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVault, usePageTitle, useHelper } from '../hooks';
 import { useToast } from '../components/ui/Toast';
@@ -132,6 +132,14 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
         >
           <Calculator className="w-3.5 h-3.5" />
         </Link>
+        <Link
+          to={`/notes?track=${encodeURIComponent(track.id)}`}
+          className={`px-3 py-2 rounded-md font-mono text-[12px] flex items-center ${t.button}`}
+          title="Remix notes"
+          aria-label={`Notes for ${track.title}`}
+        >
+          <NotebookPen className="w-3.5 h-3.5" />
+        </Link>
         <button
           type="button"
           onClick={() => onSetReference(isReference ? null : track)}
@@ -170,7 +178,7 @@ export function Vault({ theme, t }) {
   const { isSignedIn } = useAuth();
   const vault = useVault();
   const helper = useHelper();
-  const toast = useToast();
+  const { toast } = useToast();
   const isDark = theme === 'dark';
 
   const [query, setQuery] = useState('');

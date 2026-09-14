@@ -2,7 +2,7 @@ import { useRef, useState, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 // eslint-disable-next-line no-unused-vars -- motion is used as motion.div, motion.span etc.
 import { motion, useMotionValue, useTransform, useSpring } from 'motion/react';
-import { FlaskConical, Archive, Calculator, Settings as SettingsIcon, Lock, Unlock, Sun, Moon } from 'lucide-react';
+import { FlaskConical, Archive, Calculator, NotebookPen, Settings as SettingsIcon, Lock, Unlock, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { LabSignIn } from '../auth';
 
@@ -133,6 +133,7 @@ export function Dock({ theme, onToggleTheme, hidden }) {
     { to: '/', icon: FlaskConical, label: 'Lab' },
     { to: '/vault', icon: Archive, label: 'Vault' },
     { to: '/calc', icon: Calculator, label: 'Calculator' },
+    { to: '/notes', icon: NotebookPen, label: 'Notes' },
     { to: '/settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
