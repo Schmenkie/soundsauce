@@ -192,12 +192,33 @@ async function ytdlpJson(target, extraArgs = []) {
 // resolve: URL or search text -> candidate list
 // ---------------------------------------------------------------------------
 
+/** "https://soundcloud.com/jheneaiko/love-bomb?si=…" → "jheneaiko love bomb" */
+function nameFromUrl(u) {
+  try {
+    const parts = new URL(u).pathname.split('/').filter(Boolean).filter(p => !/^(sets|tracks|watch|playlist)$/i.test(p));
+    return parts.slice(-2).join(' ').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  } catch { return ''; }
+}
+
 async function resolve(query) {
   const q = String(query || '').trim();
   if (!q) return [];
 
   if (isUrl(q)) {
-    const info = await ytdlpJson(q);
+    let info;
+    try {
+      info = await ytdlpJson(q);
+    } catch (err) {
+      if (!/DRM/i.test(err.stderr || err.message || '')) throw err;
+      // Protected stream (major-label SoundCloud upload). Turn the URL slug into a name
+      // and search instead — the same track is usually on YouTube unprotected.
+      const name = nameFromUrl(q);
+      const alternatives = name ? (await resolve(name)).filter(r => r.url.split('?')[0] !== q.split('?')[0]) : [];
+      const drmErr = new Error(`SoundCloud serves this one as a protected (DRM) stream — it can't be downloaded from there.${alternatives.length ? ` Here's what else is out there for "${name}":` : ''}`);
+      drmErr.code = 'DRM';
+      drmErr.alternatives = alternatives;
+      throw drmErr;
+    }
     if (info._type === 'playlist' && Array.isArray(info.entries)) {
       // Playlist / set / album: return the entries so the Lab can pick or queue
       return info.entries.slice(0, 50).map((e) => normalizeEntry({ ...e, extractor_key: e.ie_key || info.extractor_key }));
@@ -319,6 +340,13 @@ function startJob(url) {
     try {
       if (code !== 0) {
         const friendly = stderrTail.match(/ERROR:\s*(.+)/)?.[1]?.trim();
+        if (/DRM/i.test(stderrTail)) {
+          // Major-label SoundCloud uploads are served as encrypted streams; yt-dlp (rightly)
+          // won't touch them. The same track is usually on YouTube unprotected.
+          const err = new Error('SoundCloud serves this one as a protected (DRM) stream — it can\'t be downloaded from there. Try the YouTube version.');
+          err.code = 'DRM';
+          throw err;
+        }
         throw new Error(friendly || `yt-dlp exited with code ${code}`);
       }
       const files = fs.readdirSync(dir);
@@ -363,6 +391,7 @@ function startJob(url) {
     } catch (err) {
       job.status = 'error';
       job.error = err.message;
+      job.errorCode = err.code || null;
       log(`job ${id.slice(0, 8)} failed:`, err.message);
     }
   });
@@ -380,6 +409,7 @@ function publicJob(job) {
     progress: job.progress,
     result: job.result ? result : null,
     error: job.error,
+    errorCode: job.errorCode || null,
   };
 }
 
@@ -480,8 +510,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/resolve') {
       const { query } = await readBody(req);
       if (!query) return json(res, 400, { error: 'query required' });
-      const results = await resolve(query);
-      return json(res, 200, { results });
+      try {
+        const results = await resolve(query);
+        return json(res, 200, { results });
+      } catch (err) {
+        if (err.code !== 'DRM') throw err;
+        return json(res, 200, { results: err.alternatives || [], notice: err.message, code: 'DRM' });
+      }
     }
 
     if (req.method === 'POST' && p === '/jobs') {

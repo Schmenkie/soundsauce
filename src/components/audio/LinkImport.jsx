@@ -72,14 +72,16 @@ export function LinkImport({ helper, onImported, onBatch, batch, onCancelBatch, 
     setFromPlaylist(false);
     try {
       const list = await resolve(trimmed);
-      if (list.length === 0) setError('Nothing found for that.');
+      // list.notice = the helper couldn't use the link (DRM) and searched by name instead
+      if (list.notice) setError(list.notice);
+      else if (list.length === 0) setError('Nothing found for that.');
       setResults(list);
       // A playlist / set URL comes back as its entries — offer them as a batch
-      const playlist = !!extractMediaUrl(trimmed) && list.length > 1;
+      const playlist = !!extractMediaUrl(trimmed) && list.length > 1 && !list.notice;
       setFromPlaylist(playlist);
       setSelected(new Set(playlist ? list.filter(r => !r.isPlaylist).map(r => r.url) : []));
       // A pasted single-track URL resolves to exactly one result — go straight to grabbing
-      if (list.length === 1 && extractMediaUrl(trimmed) && !list[0].isPlaylist) {
+      if (list.length === 1 && extractMediaUrl(trimmed) && !list[0].isPlaylist && !list.notice) {
         await handleGrab(list[0]);
       }
     } catch (err) {
@@ -101,6 +103,20 @@ export function LinkImport({ helper, onImported, onBatch, batch, onCancelBatch, 
       setClipboardUrl(null);
     } catch (err) {
       setError(err.message);
+      if (err.code === 'DRM') {
+        // Offer the same track from elsewhere: search by name, YouTube results included
+        const name = [item.artist || item.uploader, item.title].filter(Boolean).join(' ');
+        if (name) {
+          setGrabbingUrl(null);
+          setQuery(name);
+          setFromPlaylist(false);
+          try {
+            const list = (await resolve(name)).filter(r => r.url !== item.url);
+            setResults(list);
+            if (list.length) setError(`${err.message} Here's what else is out there for "${name}":`);
+          } catch { /* keep the DRM message */ }
+        }
+      }
     } finally {
       setGrabbingUrl(null);
     }

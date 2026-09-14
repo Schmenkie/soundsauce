@@ -44,8 +44,10 @@ export function useHelper() {
   const resolve = useCallback(async (query) => {
     setResolving(true);
     try {
-      const { results } = await helperResolve(query);
-      return results || [];
+      const { results, notice } = await helperResolve(query);
+      const list = results || [];
+      if (notice) list.notice = notice; // e.g. DRM: the helper searched by name instead
+      return list;
     } finally {
       if (mountedRef.current) setResolving(false);
     }
@@ -67,7 +69,9 @@ export function useHelper() {
       if (state.status === 'done' || state.status === 'error') break;
     }
     if (state.status === 'error') {
-      throw new Error(state.error || 'Download failed');
+      const err = new Error(state.error || 'Download failed');
+      err.code = state.errorCode || null;
+      throw err;
     }
 
     // Pull the FLAC into memory so the Lab can decode it like an uploaded file
