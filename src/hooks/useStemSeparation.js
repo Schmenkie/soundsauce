@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { upload } from '@vercel/blob/client';
 import { zipSync, strToU8 } from 'fflate';
 import { trackStemSeparationStarted, trackStemSeparationCompleted } from '../lib/posthog';
@@ -622,9 +622,9 @@ export function useStemSeparation() {
   }, [stemAudioData]);
 
   /** Stem types available in the current result, in canonical display order */
-  const stemTypes = stems
+  const stemTypes = useMemo(() => stems
     ? ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'].filter(k => stems[k])
-    : [];
+    : [], [stems]);
 
   return {
     // State
