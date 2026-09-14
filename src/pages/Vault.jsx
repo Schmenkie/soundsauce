@@ -7,16 +7,12 @@ import { useToast } from '../components/ui/Toast';
 import { LabSignIn } from '../components/auth';
 import { getStemLabel, displayKeyName } from '../utils/stemFiles';
 import { stemColor } from '../utils/spectrum';
-import { compatibleCamelot, tempoCompatible } from '../lib/vault';
+import { compatibleCamelot, tempoCompatible, BLOB_LIMIT_BYTES, formatMB } from '../lib/vault';
 import { downloadRemixPackFromUrls, downloadStemFromUrl, saveStemsToLive } from '../utils/remixPack';
 import { formatDuration } from '../lib/helper';
 
-const BLOB_LIMIT_BYTES = 1024 * 1024 * 1024; // Vercel Hobby
 const STEM_ORDER = ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'];
 
-function fmtMB(bytes) {
-  return `${(bytes / 1048576).toFixed(0)} MB`;
-}
 
 /** Chip in one of the spectrum colours */
 function Chip({ children, color, theme, title }) {
@@ -283,7 +279,7 @@ export function Vault({ theme, t }) {
           </h2>
           <p className={`font-mono text-[12px] mt-1 ${t.textMuted}`}>
             {vault.tracks.length} track{vault.tracks.length === 1 ? '' : 's'}
-            {vault.storage ? ` — ${fmtMB(used)} of 1 GB used` : ''}
+            {vault.storage ? ` — ${formatMB(used)} of 1 GB used` : ''}
             {vault.loading ? ' — syncing…' : ''}
           </p>
         </div>
@@ -294,7 +290,7 @@ export function Vault({ theme, t }) {
         </div>
       </div>
       {/* Storage bar */}
-      <div className={`h-1 rounded-full overflow-hidden mb-6 ${isDark ? 'bg-[#14171C]' : 'bg-[#E1E5EA]'}`} title={`${fmtMB(used)} of 1 GB`}>
+      <div className={`h-1 rounded-full overflow-hidden mb-6 ${isDark ? 'bg-[#14171C]' : 'bg-[#E1E5EA]'}`} title={`${formatMB(used)} of 1 GB`}>
         <div className="h-full bg-spectrum transition-all" style={{ width: `${usedPct}%` }} />
       </div>
 

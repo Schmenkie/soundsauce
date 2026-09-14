@@ -68,6 +68,24 @@ export async function deleteVaultBlobs(urls) {
 }
 
 /** Stable id for a track: the source upload's blob URL is unique per upload. */
+/** Vercel Hobby Blob allowance */
+export const BLOB_LIMIT_BYTES = 1024 * 1024 * 1024;
+/** What a two-stem FLAC grab costs on average (source upload + vocals + instrumental) */
+export const BYTES_PER_GRAB = 55 * 1024 * 1024;
+
+export function formatMB(bytes) {
+  return `${(bytes / 1048576).toFixed(0)} MB`;
+}
+
+/** "356 MB used · ~12 more tracks fit" */
+export function describeStorage(storage) {
+  if (!storage) return null;
+  const used = storage.usedBytes || 0;
+  const free = Math.max(0, BLOB_LIMIT_BYTES - used);
+  const grabsLeft = Math.floor(free / BYTES_PER_GRAB);
+  return { used, free, grabsLeft, usedPct: Math.min(100, (used / BLOB_LIMIT_BYTES) * 100), blobCount: storage.blobCount || 0 };
+}
+
 export function vaultIdFor(audioUrl) {
   if (!audioUrl) return null;
   // Take the random suffix Vercel appends — short, unique, URL-safe

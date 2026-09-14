@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Settings as SettingsIcon, Sun, Moon, Save, Lock, Unlock, HardDrive } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { usePageTitle } from '../hooks';
+import { usePageTitle, useVault } from '../hooks';
 import { LabSignIn } from '../components/auth';
+import { describeStorage, formatMB } from '../lib/vault';
 
 const DAW_OPTIONS = ['Ableton Live', 'FL Studio', 'Logic Pro', 'Bitwig', 'Reaper', 'Pro Tools', 'Other'];
 
@@ -14,6 +16,8 @@ export function Settings({ theme, t, onThemeToggle }) {
   usePageTitle('Settings');
   const { isSignedIn, signOut, prefs, updatePrefs } = useAuth();
   const [signInOpen, setSignInOpen] = useState(false);
+  const vault = useVault();
+  const storage = describeStorage(vault.storage);
 
   const isDark = theme === 'dark';
   const inputClass = `w-full px-4 py-3 rounded-md border outline-none focus:ring-2 text-sm ${
@@ -149,9 +153,29 @@ export function Settings({ theme, t, onThemeToggle }) {
           Storage
         </h3>
         <div className={card}>
+          {storage ? (
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <div className={`font-mono text-sm ${t.text}`}>
+                  {formatMB(storage.used)} <span className={t.textMuted}>of 1 GB used</span>
+                </div>
+                <div className={`font-mono text-[12px] ${t.textMuted}`}>
+                  ~{storage.grabsLeft} more {storage.grabsLeft === 1 ? 'track fits' : 'tracks fit'} · {vault.tracks.length} in the vault · {storage.blobCount} files
+                </div>
+              </div>
+              <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-[#14171C]' : 'bg-[#E1E5EA]'}`}>
+                <div className="h-full bg-spectrum transition-all" style={{ width: `${storage.usedPct}%` }} />
+              </div>
+            </div>
+          ) : (
+            <p className={`font-mono text-[12px] ${t.textMuted}`}>
+              {isSignedIn ? 'Loading storage…' : 'Unlock the lab to see storage.'}
+            </p>
+          )}
           <p className={`text-sm ${t.textMuted}`}>
-            Kept stems live on Vercel Blob (1 GB on the Hobby plan). A two-stem FLAC grab is roughly 40–60 MB,
-            so keep only the stems you'll come back to.
+            Kept stems live on Vercel Blob (1 GB on the Hobby plan). A two-stem FLAC grab is roughly 55 MB, so
+            keep only the stems you'll come back to — deleting a track in the{' '}
+            <Link to="/vault" className="underline">Vault</Link> frees its space.
           </p>
         </div>
       </div>
