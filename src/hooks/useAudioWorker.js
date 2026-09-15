@@ -66,9 +66,10 @@ export function useAudioWorker() {
    * Send a message to the worker and wait for response.
    * @param {string} type - Message type
    * @param {Object} payload - Message payload
+   * @param {ArrayBuffer[]} [transfer] - Buffers to hand over instead of copying
    * @returns {Promise} - Resolves with the result
    */
-  const postMessage = useCallback((type, payload) => {
+  const postMessage = useCallback((type, payload, transfer = []) => {
     return new Promise((resolve, reject) => {
       if (!workerRef.current) {
         reject(new Error('Worker not initialized'));
@@ -79,63 +80,9 @@ export function useAudioWorker() {
       pendingRequestsRef.current.set(id, { resolve, reject });
       setIsProcessing(true);
 
-      workerRef.current.postMessage({ type, payload, id });
+      workerRef.current.postMessage({ type, payload, id }, transfer);
     });
   }, []);
-
-  /**
-   * Run full audio analysis in the worker.
-   * @param {Float32Array} channelData - Audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @returns {Promise<Object>} - Analysis results
-   */
-  const analyzeAudio = useCallback(async (channelData, sampleRate) => {
-    // Convert Float32Array to transferable buffer
-    const buffer = channelData.buffer.slice(0);
-    return postMessage('ANALYZE_FULL', {
-      channelData: buffer,
-      sampleRate
-    });
-  }, [postMessage]);
-
-  /**
-   * Detect instruments in the worker.
-   * @param {Float32Array} channelData - Audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @returns {Promise<Object>} - Instrument detection result
-   */
-  const detectInstruments = useCallback(async (channelData, sampleRate) => {
-    const buffer = channelData.buffer.slice(0);
-    return postMessage('DETECT_INSTRUMENTS', { channelData: buffer, sampleRate });
-  }, [postMessage]);
-
-  /**
-   * Calculate spectral match in the worker.
-   * @param {Float32Array} channelDataA - First audio samples
-   * @param {Float32Array} channelDataB - Second audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @returns {Promise<Object>} - Match result
-   */
-  const calculateSpectralMatch = useCallback(async (channelDataA, channelDataB, sampleRate) => {
-    const bufferA = channelDataA.buffer.slice(0);
-    const bufferB = channelDataB.buffer.slice(0);
-    return postMessage('SPECTRAL_MATCH', {
-      channelDataA: bufferA,
-      channelDataB: bufferB,
-      sampleRate
-    });
-  }, [postMessage]);
-
-  /**
-   * Detect harmonics in the worker.
-   * @param {Float32Array} channelData - Audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @returns {Promise<Array>} - Harmonics data
-   */
-  const detectHarmonics = useCallback(async (channelData, sampleRate) => {
-    const buffer = channelData.buffer.slice(0);
-    return postMessage('DETECT_HARMONICS', { channelData: buffer, sampleRate });
-  }, [postMessage]);
 
   /**
    * Generate high-resolution min/max waveform data in the worker.
@@ -159,18 +106,6 @@ export function useAudioWorker() {
   }, [postMessage]);
 
   /**
-   * Extract wavetable frames from audio for Vital preset injection.
-   * @param {Float32Array} channelData - Audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @param {number} [numFrames=256] - Number of wavetable frames to extract
-   * @returns {Promise<Object>} - { keyframes, fundamentalHz, numFrames, success, error? }
-   */
-  const extractWavetable = useCallback(async (channelData, sampleRate, numFrames = 256) => {
-    const buffer = channelData.buffer.slice(0);
-    return postMessage('EXTRACT_WAVETABLE', { channelData: buffer, sampleRate, numFrames });
-  }, [postMessage]);
-
-  /**
    * Spectral-centroid colour map for the waveform (Signal Deck). One t ∈ [0,1] per column,
    * -1 for silence.
    * @returns {Promise<{ colors: Float32Array, numColumns: number }>}
@@ -181,17 +116,12 @@ export function useAudioWorker() {
   }, [postMessage]);
 
   /**
-   * Quick tempo + key detection (no full feature extraction). Used to stamp
-   * stem filenames with BPM/key as soon as a track is decoded.
+   * Quick tempo + key detection. Used to stamp stem filenames with BPM/key as soon as
+   * a track is decoded.
    * @param {Float32Array} channelData - Mono audio samples
    * @param {number} sampleRate
    * @returns {Promise<{ bpm: Object, key: Object }>}
    */
-  /** Per-bar anatomy of a stem: structure, chords / bass roots, drum density, band balance */
-  const analyzeStemAnatomy = useCallback((channelData, sampleRate, options) => {
-    return postMessage('ANALYZE_STEM_ANATOMY', { channelData: channelData.buffer.slice(0), sampleRate, options });
-  }, [postMessage]);
-
   const detectTempoAndKey = useCallback(async (channelData, sampleRate) => {
     const [bpm, key] = await Promise.all([
       postMessage('DETECT_BPM', { channelData: channelData.buffer.slice(0), sampleRate }),
@@ -200,17 +130,28 @@ export function useAudioWorker() {
     return { bpm, key };
   }, [postMessage]);
 
+  /**
+   * Section labels (intro / breakdown / buildup / drop / outro) from per-bar energy.
+   * @param {{ role: string, data: Float32Array }[]} layers  the full mix, or one entry per stem
+   * @param {number} sampleRate
+   * @param {{ bpm?: number, gridOffset?: number }} options
+   * @returns {Promise<{ sections: { label: string, start: number }[], bars: { start: number, intensity: number }[], barSec: number }>}
+   */
+  const detectSections = useCallback((layers, sampleRate, options) => {
+    const payload = {
+      layers: layers.map(l => ({ role: l.role, channelData: l.data.buffer.slice(l.data.byteOffset, l.data.byteOffset + l.data.byteLength) })),
+      sampleRate,
+      options,
+    };
+    return postMessage('DETECT_SECTIONS', payload, payload.layers.map(l => l.channelData));
+  }, [postMessage]);
+
   return {
     isProcessing,
     progress,
-    analyzeAudio,
-    detectInstruments,
     detectTempoAndKey,
-    analyzeStemAnatomy,
+    detectSections,
     generateWaveformColors,
-    calculateSpectralMatch,
-    detectHarmonics,
     generateWaveformData,
-    extractWavetable
   };
 }

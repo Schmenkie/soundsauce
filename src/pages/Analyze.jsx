@@ -5,69 +5,52 @@ import { useAudioProcessor, useStemSeparation, usePageTitle, useHelper, useVault
 import { useSearchParams } from 'react-router-dom';
 import { vaultIdFor } from '../lib/vault';
 import { useAuth } from '../contexts/AuthContext';
-import { labAuthHeaders, getLabToken } from '../lib/labAuth';
-import { upload } from '@vercel/blob/client';
 
 // Components
 import { useToast } from '../components/ui/Toast';
 import { LabSignIn } from '../components/auth';
-import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, InstrumentSelector, AnalyzeSection, StemSelector, StemPlayer, VocalChopKit, TrackAnatomy, PresetSelector, LinkImport } from '../components/audio';
-import { Music, Scissors, Sparkles, Loader2, ArrowLeft, AlertTriangle, UploadCloud, Download } from 'lucide-react';
-import { AnalysisStepFlow } from '../components/analysis';
-import { ExportToolbar } from '../components/comparison';
+import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, StemSelector, StemPlayer, SectionStrip, LinkImport } from '../components/audio';
+import { Music, Loader2, AlertTriangle, UploadCloud, Download } from 'lucide-react';
 
 // Utils
-import { instrumentLabels } from '../utils/constants';
-import { generateInstrumentRecommendations } from '../utils/recommendations';
-import { audioBufferToWav } from '../utils/demoSoundGenerator';
-import { displayKeyName, SEPARATION_MODES } from '../utils/stemFiles';
+import { displayKeyName } from '../utils/stemFiles';
 import { saveBlob, mimeForExt, saveStemsToLive } from '../utils/remixPack';
 
-// Analytics
+const ALLOWED_EXTENSIONS = ['wav', 'mp3', 'm4a', 'flac'];
+const ALLOWED_MIME_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/x-flac'];
 
-
-// AI (Gemini) label → app instrument category mapping
-const AI_LABEL_MAP = {
-  'synth pad': 'pad',
-  'synth lead': 'lead',
-  'synth bass': 'bass',
-  '808 bass': 'bass',
-  'sub bass': 'sub-bass',
-  'bass guitar': 'bass',
-  'electric bass': 'bass',
-  'acoustic guitar': 'guitar',
-  'electric guitar': 'guitar',
-  'piano': 'keys',
-  'brass': 'brass',
-  'strings': 'strings',
-  'woodwind': 'woodwind',
-  'vocal': 'vocal',
-  'kick drum': 'kick',
-  'snare drum': 'snare',
-  'hi-hat': 'hihat',
-  'drums': 'drums',
-  'pluck synth': 'pluck',
-  'full mix': 'full',
+const isAllowedAudioFile = (file) => {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(ext) || ALLOWED_MIME_TYPES.includes(file.type);
 };
 
-// Stem-specific labels for Gemini AI detection — narrowed options improve accuracy
-const STEM_LABELS = {
-  bass: ['synth bass', '808 bass', 'sub bass', 'bass guitar', 'pluck synth', 'kick drum'],
-  drums: ['kick drum', 'snare drum', 'hi-hat', 'drums', 'synth pad', 'full mix'],
-  vocals: ['vocal', 'synth pad', 'synth lead', 'strings', 'brass', 'woodwind'],
-  other: null, // Use default labels
-};
+/** Mono mixdown of an AudioBuffer, decimated by `by` (section detection only needs ≤ 8 kHz) */
+function monoOf(buffer, by = 2) {
+  const chans = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+  const len = Math.floor(buffer.length / by);
+  const out = new Float32Array(len);
+  const scale = 1 / (chans.length * by);
+  for (let i = 0; i < len; i++) {
+    let s = 0;
+    const base = i * by;
+    for (const d of chans) for (let k = 0; k < by; k++) s += d[base + k];
+    out[i] = s * scale;
+  }
+  return out;
+}
 
 /**
- * Analyze page - The main audio analyzer tool
- * Receives theme and t (theme classes) from parent layout
+ * The Lab (route "/"): paste a link or drop a file → BPM + key → stems → sections.
+ *
+ * Before stems exist the page shows the full-mix waveform with a section strip above it;
+ * once separation finishes the Stem Player (with the same strip) is the only timeline.
+ * Sections are detected from the full mix right after decode, re-detected from the
+ * stems when they load, and saved to the vault with the track (edits win over detection).
  */
 export function Analyze({ theme, t }) {
-  // Custom hooks
-  const { isSignedIn, prefs } = useAuth();
+  const { isSignedIn } = useAuth();
   const audio = useAudioProcessor();
   const { toast } = useToast();
-  // Stem separation hook
   const {
     stems,
     stemTypes,
@@ -89,7 +72,7 @@ export function Analyze({ theme, t }) {
     keepAllStems,
   } = useStemSeparation();
 
-  // Stem Player (synced mute/solo of every stem) — pauses the single-source player when it starts
+  // Stem Player pauses the single-source player when it starts
   const audioRef = useRef(null);
   const audioFileDataRef = useRef(null);
   const pauseMainPlayback = useCallback(() => {
@@ -98,121 +81,61 @@ export function Analyze({ theme, t }) {
   }, []);
   const stemPlayer = useStemPlayer({ stemTypes, getStemAudio, onPlay: pauseMainPlayback });
 
-  // Local yt-dlp companion for link / search imports
   const helper = useHelper();
-
-  // The Vault — every separated track, auto-saved when stems land
   const vault = useVault();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [restoringTrack, setRestoringTrack] = useState(null); // vault track being restored
+  const [restoringTrack, setRestoringTrack] = useState(null);
 
-
-  // UI state
+  // Track state
   const [audioFileData, setAudioFileData] = useState(null);
   const [audioMetadata, setAudioMetadata] = useState({ title: '', artist: '', sourceFilename: '' });
-  // Quick BPM/key detected right after decode (before any full analysis) — used to
-  // stamp stem filenames and show the tempo/key chip in the header
-  const [trackInfo, setTrackInfo] = useState(null);
-  useEffect(() => { audioRef.current = audio; audioFileDataRef.current = audioFileData; });
-  usePageTitle('Lab', audioMetadata.title || undefined);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
-  const [wavetableData, setWavetableData] = useState(null);
-  const [detectedInstruments, setDetectedInstruments] = useState(null);
+  const [trackInfo, setTrackInfo] = useState(null); // { bpm, key } right after decode
   const [error, setError] = useState(null);
-  const [selectedInstrument, setSelectedInstrument] = useState('full');
   const [isDragging, setIsDragging] = useState(false);
-
-  // Stem playback state
-  const [playingStem, setPlayingStem] = useState(null); // 'vocals' | 'drums' | 'bass' | 'other' | null
-  // Track which stem is currently being analyzed (for UI indicator on stem cards)
-  const [analyzingStemType, setAnalyzingStemType] = useState(null);
-
-  // Upgrade prompt state
-
-  // Step flow state — guided post-analysis experience
-  const [expandedSteps, setExpandedSteps] = useState(new Set([1])); // Step 1 auto-expanded
-  const [completedSteps, setCompletedSteps] = useState(new Set());
   const [showSignIn, setShowSignIn] = useState(false);
   const [signInReason, setSignInReason] = useState(null);
 
-  // Refs
+  // Arrangement: bar grid + sections
+  const [gridOffset, setGridOffset] = useState(0);        // seconds — where bar 1 lands
+  const [sections, setSections] = useState(null);          // [{ label, start }] or null
+  const [sectionsSource, setSectionsSource] = useState(null); // 'mix' | 'stems' | 'manual'
+  const [sectionsDetecting, setSectionsDetecting] = useState(false);
+  const sectionsKeyRef = useRef('');
+
+  useEffect(() => { audioRef.current = audio; audioFileDataRef.current = audioFileData; });
+  usePageTitle('Lab', audioMetadata.title || undefined);
+
   const dropZoneRef = useRef(null);
-  const stemSectionRef = useRef(null);
-  const waveformSectionRef = useRef(null);
-  const resultsSectionRef = useRef(null);
+  const stemsReady = separationStatus === 'ready' && stemTypes.length > 0;
 
-  // AI detection state (Gemini-powered, runs after heuristic analysis)
-  const [aiDetectionStatus, setAIDetectionStatus] = useState('idle'); // idle | uploading | detecting | done | error
-  const aiAbortRef = useRef(0);
-  const reAnalyzeRef = useRef(null); // Ref to reAnalyzeWithInstrument for stable CLAP callback
-
-  // Stem waveform state — which stem's waveform is shown in the main visualizer
-  const [activeStemView, setActiveStemView] = useState(null); // null = full mix, 'vocals'|'drums'|'bass'|'other'
-  const stemWaveformDataRef = useRef({}); // { vocals: { preview, hiRes, duration }, ... }
-  const [stemWaveformPreview, setStemWaveformPreview] = useState(null); // 200-point preview for active stem
-  const stemWaveformHiResRef = useRef(null); // hi-res min/max for active stem
-  const stemWaveformColorRef = useRef(null); // spectral colour map for active stem (Signal Deck)
-  const activeStemViewRef = useRef(null); // ref mirror for async callbacks
-  const [stemLoopRegions, setStemLoopRegions] = useState({}); // { vocals: { start, end, enabled }, ... }
-
-  // Abort AI detection on unmount
-  useEffect(() => {
-    return () => { aiAbortRef.current++; };
-  }, []);
-
-  // Keep activeStemView ref in sync for async callbacks
-  useEffect(() => {
-    activeStemViewRef.current = activeStemView;
-  }, [activeStemView]);
-
-  // Store prepareAudioBuffer in a ref to avoid dependency issues
+  // ---- Decode on load ----
   const prepareAudioBufferRef = useRef(audio.prepareAudioBuffer);
-  useEffect(() => {
-    prepareAudioBufferRef.current = audio.prepareAudioBuffer;
-  }, [audio.prepareAudioBuffer]);
-
-  // Track last processed audio to prevent duplicate preparation
+  useEffect(() => { prepareAudioBufferRef.current = audio.prepareAudioBuffer; }, [audio.prepareAudioBuffer]);
   const lastProcessedAudioRef = useRef(null);
 
-  // Prepare audio buffer on upload (NO instrument detection - that happens on Analyze)
   useEffect(() => {
-    if (!audioFileData) return;
-
-    // Skip if we already processed this exact audio file
-    if (lastProcessedAudioRef.current === audioFileData) return;
+    if (!audioFileData || lastProcessedAudioRef.current === audioFileData) return;
     lastProcessedAudioRef.current = audioFileData;
-
-    const prepareBuffer = async () => {
+    (async () => {
       setError(null);
       const result = await prepareAudioBufferRef.current(audioFileData);
-      if (result.error) {
-        setError(result.error);
-      }
-    };
-
-    prepareBuffer();
+      if (result.error) setError(result.error);
+    })();
   }, [audioFileData]);
 
-  // Quick tempo + key detection as soon as the buffer is decoded, so stems can be
-  // stamped with BPM/key before (or without) a full analysis. Key detection samples
-  // windows across the whole track (capped at 6 min of mono), so intros don't fool it.
+  // ---- Quick tempo + key right after decode (stamps filenames, drives the bar grid) ----
   const detectTempoAndKeyRef = useRef(audio.detectTempoAndKey);
-  useEffect(() => {
-    detectTempoAndKeyRef.current = audio.detectTempoAndKey;
-  }, [audio.detectTempoAndKey]);
+  useEffect(() => { detectTempoAndKeyRef.current = audio.detectTempoAndKey; }, [audio.detectTempoAndKey]);
 
   useEffect(() => {
     const buffer = audio.audioBuffer;
     setTrackInfo(null);
     if (!buffer || !detectTempoAndKeyRef.current) return;
-
     let cancelled = false;
-    const run = async () => {
+    (async () => {
       try {
         const sampleRate = buffer.sampleRate;
         const maxSamples = Math.min(buffer.length, sampleRate * 360);
-        // Mono mixdown of the analysed window
         const mono = new Float32Array(maxSamples);
         for (let c = 0; c < buffer.numberOfChannels; c++) {
           const data = buffer.getChannelData(c);
@@ -223,567 +146,151 @@ export function Analyze({ theme, t }) {
       } catch (err) {
         console.warn('Quick tempo/key detection failed:', err);
       }
-    };
-    run();
+    })();
     return () => { cancelled = true; };
   }, [audio.audioBuffer]);
 
+  // ---- Sections: full mix first, stems when they land, never over a manual edit ----
+  const detectSectionsRef = useRef(audio.detectSections);
+  useEffect(() => { detectSectionsRef.current = audio.detectSections; }, [audio.detectSections]);
+  const getStemBufferRef = useRef(stemPlayer.getBuffer);
+  useEffect(() => { getStemBufferRef.current = stemPlayer.getBuffer; }, [stemPlayer.getBuffer]);
 
-  // Handlers that wrap audio processor methods (declared before useEffect that uses them)
-  const handleTogglePlayback = useCallback(async () => {
-    if (!audio.isPlaying) stemPlayer.pause();
-    // Play the active stem if one is being viewed, otherwise play full mix
-    const activeStem = activeStemViewRef.current;
-    let audioToPlay = audioFileData;
+  useEffect(() => {
+    const buffer = audio.audioBuffer;
+    if (!buffer || !trackInfo || sectionsSource === 'manual') return;
+    const useStems = stemPlayer.status === 'ready' && stemTypes.length > 0;
+    if (!useStems && sectionsSource === 'stems') return; // don't downgrade a stems result
+    const bpm = trackInfo.bpm?.bpm || 0;
+    const key = `${useStems ? `stems:${stemTypes.join(',')}` : 'mix'}:${bpm}:${gridOffset.toFixed(3)}`;
+    if (sectionsKeyRef.current === key) return;
+    sectionsKeyRef.current = key;
 
-    if (activeStem) {
-      // Use cached stem audio if available, otherwise download it
-      if (stemAudioData[activeStem]) {
-        audioToPlay = stemAudioData[activeStem];
-      } else {
-        const downloaded = await getStemAudio(activeStem);
-        if (downloaded) {
-          audioToPlay = downloaded;
-        }
+    let cancelled = false;
+    (async () => {
+      setSectionsDetecting(true);
+      try {
+        const by = 2;
+        const layers = useStems
+          ? stemTypes.map(type => ({ role: type, buf: getStemBufferRef.current(type) })).filter(l => l.buf).map(l => ({ role: l.role, data: monoOf(l.buf, by) }))
+          : [{ role: 'mix', data: monoOf(buffer, by) }];
+        if (!layers.length) return;
+        const result = await detectSectionsRef.current(layers, buffer.sampleRate / by, { bpm, gridOffset });
+        if (cancelled || sectionsKeyRef.current !== key) return;
+        setSections(result.sections);
+        setSectionsSource(useStems ? 'stems' : 'mix');
+      } catch (err) {
+        console.warn('Section detection failed:', err);
+      } finally {
+        if (!cancelled) setSectionsDetecting(false);
       }
-      setPlayingStem(activeStem);
-    } else if (playingStem) {
-      setPlayingStem(null);
-    }
+    })();
+    return () => { cancelled = true; };
+  }, [audio.audioBuffer, trackInfo, stemPlayer.status, stemTypes, gridOffset, sectionsSource]);
 
-    const result = await audio.togglePlayback(audioToPlay);
-    if (result.error) {
-      setError(result.error);
-    } else {
-      setError(null);
-    }
-  }, [audio.togglePlayback, audio.isPlaying, audioFileData, stemAudioData, getStemAudio, playingStem, stemPlayer.pause]);
-
-  const handleClearLoop = useCallback(() => {
-    audio.clearLoop();
-  }, [audio.clearLoop]);
-
-  // Waveform interaction callbacks (Canvas component handles all mouse/touch internally)
-  const handleWaveformSeek = useCallback((time) => {
-    audio.seek(time);
-  }, [audio.seek]);
-
-  const handleLoopRegionChange = useCallback((region) => {
-    if (region) {
-      audio.setLoopStart(region.start);
-      audio.setLoopEnd(region.end);
-      audio.setLoopEnabled(true);
-    } else {
-      audio.clearLoop();
-    }
-  }, [audio.setLoopStart, audio.setLoopEnd, audio.setLoopEnabled, audio.clearLoop]);
-
-  // Stem-aware loop region handlers — route to stem loop or full mix loop
-  const handleViewLoopRegionChange = useCallback((region) => {
-    if (!activeStemView) {
-      handleLoopRegionChange(region);
-      return;
-    }
-    if (region) {
-      setStemLoopRegions(prev => ({
-        ...prev,
-        [activeStemView]: { start: region.start, end: region.end, enabled: true }
-      }));
-    } else {
-      setStemLoopRegions(prev => {
-        const next = { ...prev };
-        delete next[activeStemView];
-        return next;
-      });
-    }
-  }, [activeStemView, handleLoopRegionChange]);
-
-  const handleToggleViewLoop = useCallback(() => {
-    if (activeStemView) {
-      setStemLoopRegions(prev => {
-        const current = prev[activeStemView];
-        if (!current) return prev;
-        return { ...prev, [activeStemView]: { ...current, enabled: !current.enabled } };
-      });
-    } else {
-      audio.setLoopEnabled(!audio.loopEnabled);
-    }
-  }, [activeStemView, audio.loopEnabled, audio.setLoopEnabled]);
-
-  const handleClearViewLoop = useCallback(() => {
-    if (activeStemView) {
-      setStemLoopRegions(prev => {
-        const next = { ...prev };
-        delete next[activeStemView];
-        return next;
-      });
-    } else {
-      handleClearLoop();
-    }
-  }, [activeStemView, handleClearLoop]);
-
-  // Prepare stem waveform data (decode + generate preview + hi-res)
-  const prepareStemWaveform = useCallback(async (stemType) => {
-    // Check cache
-    if (stemWaveformDataRef.current[stemType]) {
-      return stemWaveformDataRef.current[stemType];
-    }
-
-    // Get stem audio data
-    let audioData = stemAudioData[stemType];
-    if (!audioData) {
-      audioData = await getStemAudio(stemType);
-    }
-    if (!audioData) return null;
-
-    // Decode to AudioBuffer with temporary context
-    const tempCtx = new AudioContext({ sampleRate: 48000 });
-    try {
-      const buffer = await tempCtx.decodeAudioData(audioData.slice(0));
-      const channelData = buffer.getChannelData(0);
-
-      // Generate 200-point preview (reuse existing function)
-      const preview = audio.generateWaveform(buffer);
-
-      const stemData = { preview, hiRes: null, colors: null, duration: buffer.duration };
-
-      // Cache immediately with preview
-      stemWaveformDataRef.current[stemType] = stemData;
-
-      // Generate hi-res data async via Web Worker
-      audio.generateWaveformData(channelData, buffer.sampleRate)
-        .then(hiResData => {
-          stemData.hiRes = hiResData;
-          // If this stem is still the active view, update the ref
-          if (activeStemViewRef.current === stemType) {
-            stemWaveformHiResRef.current = hiResData;
-          }
-        })
-        .catch(() => {});
-
-      // Spectral colour map for the stem waveform
-      audio.generateWaveformColors(channelData, buffer.sampleRate, 640)
-        .then(colorData => {
-          stemData.colors = colorData;
-          if (activeStemViewRef.current === stemType) {
-            stemWaveformColorRef.current = colorData;
-          }
-        })
-        .catch(() => {});
-
-      return stemData;
-    } finally {
-      tempCtx.close();
-    }
-  }, [stemAudioData, getStemAudio, audio.generateWaveform, audio.generateWaveformData, audio.generateWaveformColors]);
-
-  /**
-   * Run CLAP instrument detection in background via Replicate API.
-   * Uploads the analyzed audio region to Vercel Blob, starts a CLAP prediction,
-   * polls for results, and updates detectedInstruments when done.
-   * Runs asynchronously — heuristic results are shown immediately as preview.
-   */
-  /**
-   * Run AI-powered instrument detection via Gemini 2.5 Flash.
-   * Uploads audio to Vercel Blob, sends URL to /api/instrument (Gemini),
-   * receives results synchronously (no polling), then updates detection state.
-   * Heuristic results show instantly; AI refines in background (~2-5s).
-   */
-  const runAIDetection = useCallback(async (audioToAnalyze, isAnalyzingStem, analysisOptions, heuristicDetection, stemType) => {
-    const callId = ++aiAbortRef.current;
-
-    setAIDetectionStatus('uploading');
-
-    try {
-      // Step 1: Prepare audio data (slice to region if needed)
-      let audioData = audioToAnalyze;
-
-      if (!isAnalyzingStem && analysisOptions.regionStart != null && analysisOptions.regionEnd != null) {
-        const tempCtx = new AudioContext({ sampleRate: 48000 });
-        try {
-          const fullBuffer = await tempCtx.decodeAudioData(audioToAnalyze.slice(0));
-          const startSample = Math.floor(analysisOptions.regionStart * fullBuffer.sampleRate);
-          const endSample = Math.min(Math.floor(analysisOptions.regionEnd * fullBuffer.sampleRate), fullBuffer.length);
-          const regionBuffer = tempCtx.createBuffer(1, endSample - startSample, fullBuffer.sampleRate);
-          regionBuffer.getChannelData(0).set(fullBuffer.getChannelData(0).slice(startSample, endSample));
-          audioData = audioBufferToWav(regionBuffer);
-        } finally {
-          tempCtx.close();
-        }
-      }
-
-      if (callId !== aiAbortRef.current) return;
-
-      // Step 2: Upload to Vercel Blob
-      // Gemini detection uploads a WAV of the region; skip entirely when the lab is locked
-      if (!getLabToken()) return;
-      const authHeaders = labAuthHeaders();
-
-      const audioBlob = new Blob([audioData], { type: 'audio/wav' });
-      const file = new File([audioBlob], 'ai-analysis.wav', { type: 'audio/wav' });
-      const blobResult = await upload('ai-analysis.wav', file, {
-        access: 'public',
-        handleUploadUrl: '/api/upload-audio',
-        headers: authHeaders,
-      });
-
-      if (!blobResult.url) throw new Error('Failed to upload audio for AI detection');
-      if (callId !== aiAbortRef.current) return;
-
-      // Step 3: Call Gemini via /api/instrument (synchronous — returns results directly)
-      // Pass stem-specific labels when analyzing a known stem type for better accuracy
-      setAIDetectionStatus('detecting');
-      const stemLabels = isAnalyzingStem && stemType ? STEM_LABELS[stemType] : null;
-
-      const response = await fetch('/api/instrument', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioUrl: blobResult.url,
-          ...(stemLabels ? { labels: stemLabels } : {}),
-        }),
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || 'AI instrument detection failed');
-      }
-
-      const { results } = await response.json();
-      if (!results || callId !== aiAbortRef.current) return;
-
-      // Step 4: Map AI labels to our instrument categories
-      const aiDetected = results
-        .filter(r => r.score > 0.02)
-        .map(r => ({
-          instrument: AI_LABEL_MAP[r.label] || r.label,
-          confidence: Math.round(r.score * 100),
-          source: 'gemini',
-          aiLabel: r.label,
-        }))
-        .slice(0, 6);
-
-      if (aiDetected.length > 0) {
-        const enhancedDetection = {
-          ...heuristicDetection,
-          detected: aiDetected,
-          mlEnhanced: true,
-          mlSource: 'gemini',
-        };
-        setDetectedInstruments(enhancedDetection);
-
-        // Auto-update to the AI suggestion ONLY if it's confident enough
-        // For stems with a known instrument mapping (bass→bass, drums→drums),
-        // the stem mapping should take priority unless AI is very confident about something different
-        const topAI = aiDetected[0];
-        const heuristicTop = heuristicDetection.detected?.[0];
-        const currentIsFromStemMap = isAnalyzingStem && stemType && { bass: 'bass', drums: 'drums', vocals: 'vocal' }[stemType];
-
-        if (topAI?.instrument && topAI.instrument !== 'full' && reAnalyzeRef.current) {
-          if (currentIsFromStemMap) {
-            // For known stems: only override if AI is VERY confident (>60%) AND agrees it's a different category
-            // This prevents Gemini from overriding a correct bass→bass mapping with "kick drum 35%"
-            if (topAI.confidence > 60 && topAI.instrument !== currentIsFromStemMap) {
-              reAnalyzeRef.current(topAI.instrument);
-            } else if (topAI.instrument === currentIsFromStemMap) {
-              // AI agrees with stem mapping — no change needed, recommendations already correct
-            }
-          } else {
-            // For non-stems or 'other' stem: accept AI suggestion only if it's more confident
-            // than the heuristic. This prevents AI from overriding a high-confidence heuristic
-            // result (e.g., Pad 75%) with a lower-confidence AI guess.
-            const heuristicConf = heuristicTop?.confidence || 0;
-            if (topAI.confidence > 30 && topAI.confidence >= heuristicConf) {
-              reAnalyzeRef.current(topAI.instrument);
-            }
-          }
-        }
-      }
-
-      setAIDetectionStatus('done');
-    } catch (err) {
-      console.warn('AI detection failed, keeping heuristic results:', err);
-      setAIDetectionStatus('error');
-      // Heuristic results remain — no user-visible error
-    }
+  const handleSectionsChange = useCallback((next) => {
+    setSections(next);
+    setSectionsSource('manual');
   }, []);
 
-  const runAnalysis = useCallback(async (stemTypeOverride) => {
-    if (!audioFileData) {
-      setError('Please upload or record audio first');
-      return;
-    }
+  // ---- Full-mix player (only until stems are ready) ----
+  const { togglePlayback, seek, clearLoop, setLoopStart, setLoopEnd, setLoopEnabled, skipTime, isPlaying, loopEnabled, loopStart, loopEnd } = audio;
+  const { pause: pauseStems, togglePlay: toggleStems, seek: seekStems, setLoopRegion: setStemLoop, positionRef: stemPositionRef } = stemPlayer;
 
-    // Determine which stem we're analyzing — override takes precedence
-    const effectiveStem = stemTypeOverride || selectedInstrument;
+  const handleTogglePlayback = useCallback(async () => {
+    if (!isPlaying) pauseStems();
+    const result = await togglePlayback(audioFileData);
+    setError(result.error || null);
+  }, [togglePlayback, isPlaying, audioFileData, pauseStems]);
 
-    setIsAnalyzing(true);
-    setAnalyzingStemType(stemTypeOverride || null);
-    setError(null);
-
-    // Determine which audio to analyze:
-    // If a stem is selected and we have stems available, use the stem audio
-    // Otherwise use the full track
-    let audioToAnalyze = audioFileData;
-    const stemTypes = ['vocals', 'drums', 'bass', 'other'];
-    const isAnalyzingStem = stems && stemTypes.includes(effectiveStem);
-
-    if (isAnalyzingStem) {
-      if (stemAudioData[effectiveStem]) {
-        audioToAnalyze = stemAudioData[effectiveStem];
-      } else {
-        const stemData = await getStemAudio(effectiveStem);
-        if (stemData) {
-          audioToAnalyze = stemData;
-        } else {
-          setError(`Failed to load ${effectiveStem} stem for analysis`);
-          setIsAnalyzing(false);
-          setAnalyzingStemType(null);
-          return;
-        }
-      }
-    }
-
-    // Build analysis options — use stem-specific loop region if available, else full mix loop
-    const analysisOptions = {};
-    if (isAnalyzingStem && stemLoopRegions[effectiveStem]?.enabled) {
-      const stemRegion = stemLoopRegions[effectiveStem];
-      analysisOptions.regionStart = stemRegion.start;
-      analysisOptions.regionEnd = stemRegion.end;
-    } else if (audio.loopEnabled && audio.loopStart != null && audio.loopEnd != null) {
-      analysisOptions.regionStart = audio.loopStart;
-      analysisOptions.regionEnd = audio.loopEnd;
-    }
-
-    const result = await audio.analyzeAudio(audioToAnalyze, analysisOptions);
-
-    if (result.error) {
-      setError(result.error);
+  const handleWaveformSeek = useCallback((time) => seek(time), [seek]);
+  const handleClearLoop = useCallback(() => clearLoop(), [clearLoop]);
+  const handleLoopRegionChange = useCallback((region) => {
+    if (region) {
+      setLoopStart(region.start);
+      setLoopEnd(region.end);
+      setLoopEnabled(true);
     } else {
-      // Use instrument detection from the analysis result (region-based, more accurate)
-      const instrumentDetection = result.instrumentDetection;
-
-      // Update detected instruments state so UI shows them post-analysis
-      if (instrumentDetection) {
-        setDetectedInstruments(instrumentDetection);
-
-        // Run AI detection (Gemini) in background — heuristic results show instantly,
-        // AI refines asynchronously (~2-5s). If AI fails, heuristic results remain.
-        runAIDetection(audioToAnalyze, isAnalyzingStem, analysisOptions, instrumentDetection, effectiveStem);
-      }
-
-      // Extract wavetable from audio in background (non-blocking)
-      // Decodes audio → slices single-cycle waveforms → base64 encodes for Vital preset injection
-      (async () => {
-        try {
-          const tempCtx = new AudioContext({ sampleRate: 48000 });
-          try {
-            const buffer = await tempCtx.decodeAudioData(audioToAnalyze.slice(0));
-            let channelData = buffer.getChannelData(0);
-
-            // If region selected, slice to that region
-            if (analysisOptions.regionStart != null && analysisOptions.regionEnd != null) {
-              const startSample = Math.floor(analysisOptions.regionStart * buffer.sampleRate);
-              const endSample = Math.floor(analysisOptions.regionEnd * buffer.sampleRate);
-              channelData = channelData.slice(startSample, endSample);
-            }
-
-            const wtResult = await audio.extractWavetable(channelData, buffer.sampleRate, 256);
-            if (wtResult?.success) {
-              setWavetableData(wtResult);
-            }
-          } finally {
-            tempCtx.close();
-          }
-        } catch (err) {
-          console.warn('Wavetable extraction failed (non-critical):', err.message);
-        }
-      })();
-
-      // Smart instrument selection:
-      // - For stems: auto-map stem type to instrument (bass→bass, drums→drums, vocals→vocal, other→top detection)
-      // - For non-stem: use the top detected instrument as the smart default
-      let instrumentToUse = effectiveStem;
-      const stemToInstrumentMap = { bass: 'bass', drums: 'drums', vocals: 'vocal' };
-
-      if (isAnalyzingStem && stemToInstrumentMap[effectiveStem]) {
-        // Known stem type → map directly to instrument
-        instrumentToUse = stemToInstrumentMap[effectiveStem];
-      } else if (instrumentDetection?.detected?.length > 0) {
-        // Use the top detected instrument as smart default
-        instrumentToUse = instrumentDetection.detected[0].instrument;
-      }
-
-      // Update selectedInstrument state to the smart default
-      setSelectedInstrument(instrumentToUse);
-
-      const recommendations = generateInstrumentRecommendations(instrumentToUse, result.features, prefs.dawPreference);
-      const newAnalysis = {
-        features: result.features,
-        recommendations,
-        instrument: instrumentToUse,
-        detectedInstruments: instrumentDetection,
-        harmonics: result.harmonics,
-        analyzedStem: isAnalyzingStem ? effectiveStem : null
-      };
-      setAnalysis(newAnalysis);
-
-      // Mark Step 1 complete, auto-expand Step 2
-      setCompletedSteps(new Set([1]));
-      setExpandedSteps(new Set([2]));
-
+      clearLoop();
     }
+  }, [setLoopStart, setLoopEnd, setLoopEnabled, clearLoop]);
+  const handleToggleLoop = useCallback(() => setLoopEnabled(!loopEnabled), [loopEnabled, setLoopEnabled]);
 
-    setIsAnalyzing(false);
-    setAnalyzingStemType(null);
-    toast.success('Analysis complete');
-  }, [audioFileData, audio.analyzeAudio, audio.loopEnabled, audio.loopStart, audio.loopEnd, audio.formatTime, selectedInstrument, audioMetadata.title, stems, stemAudioData, getStemAudio, prefs.dawPreference, runAIDetection, audioBlobUrl, toast]);
+  // Section strip (pre-stems): jump there and play
+  const handleSectionSeek = useCallback((time) => {
+    seek(time);
+    if (!isPlaying) setTimeout(() => audioRef.current?.togglePlayback(audioFileDataRef.current), 30);
+  }, [seek, isPlaying]);
 
-  // Quick re-analyze: regenerate recommendations for a different instrument
-  // without re-running the full DSP pipeline (audio region hasn't changed)
-  const reAnalyzeWithInstrument = useCallback((instrument) => {
-    if (!analysis) return;
-
-    // If selecting a stem type, need full re-analysis (different audio data)
-    const stemTypes = ['vocals', 'drums', 'bass', 'other'];
-    if (stems && stemTypes.includes(instrument)) {
-      setSelectedInstrument(instrument);
-      // Let the user click the main Analyze button for stems
-      return;
-    }
-
-    const recommendations = generateInstrumentRecommendations(instrument, analysis.features, prefs.dawPreference);
-    setAnalysis(prev => ({
-      ...prev,
-      recommendations,
-      instrument,
-    }));
-    setSelectedInstrument(instrument);
-  }, [analysis, prefs.dawPreference, stems]);
-
-  // Keep reAnalyze ref in sync for CLAP callback
+  // The full-mix player disappears when stems are ready — make sure it's silent
   useEffect(() => {
-    reAnalyzeRef.current = reAnalyzeWithInstrument;
-  }, [reAnalyzeWithInstrument]);
+    if (stemsReady) pauseMainPlayback();
+  }, [stemsReady, pauseMainPlayback]);
 
-  // Keyboard shortcuts
+  // Keyboard: space play/pause, ← → skip 5 s, L loop, Esc clear loop — whichever player is on screen
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      if (!audioFileData) return;
+      if (stemsReady) {
+        if (e.code === 'Space') { e.preventDefault(); toggleStems(); }
+        else if (e.code === 'ArrowLeft') { e.preventDefault(); seekStems(stemPositionRef.current - 5); }
+        else if (e.code === 'ArrowRight') { e.preventDefault(); seekStems(stemPositionRef.current + 5); }
+        else if (e.code === 'Escape') setStemLoop(null);
+        return;
+      }
       switch (e.code) {
-        case 'Space':
-          e.preventDefault();
-          if (audioFileData) {
-            handleTogglePlayback();
-          }
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          audio.skipTime(-5);
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          audio.skipTime(5);
-          break;
-        case 'KeyL':
-          if (audio.loopStart !== null && audio.loopEnd !== null) {
-            audio.setLoopEnabled(!audio.loopEnabled);
-          }
-          break;
-        case 'Escape':
-          handleClearLoop();
-          break;
-        case 'Enter':
-          if (audioFileData && !isAnalyzing) {
-            runAnalysis();
-          }
-          break;
-        default:
-          break;
+        case 'Space': e.preventDefault(); handleTogglePlayback(); break;
+        case 'ArrowLeft': e.preventDefault(); skipTime(-5); break;
+        case 'ArrowRight': e.preventDefault(); skipTime(5); break;
+        case 'KeyL': if (loopStart !== null && loopEnd !== null) setLoopEnabled(!loopEnabled); break;
+        case 'Escape': handleClearLoop(); break;
+        default: break;
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [audioFileData, audio.skipTime, audio.loopStart, audio.loopEnd, audio.loopEnabled, audio.setLoopEnabled, isAnalyzing, handleTogglePlayback, handleClearLoop, runAnalysis]);
+  }, [audioFileData, stemsReady, toggleStems, seekStems, stemPositionRef, setStemLoop, skipTime, loopStart, loopEnd, loopEnabled, setLoopEnabled, handleTogglePlayback, handleClearLoop]);
 
-  // Drag and drop handlers
-  const handleDragEnter = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.target === dropZoneRef.current) {
-      setIsDragging(false);
-    }
-  };
-
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const ALLOWED_EXTENSIONS = ['wav', 'mp3', 'm4a', 'flac'];
-  const ALLOWED_MIME_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/x-flac'];
-
-  const isAllowedAudioFile = (file) => {
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    return ALLOWED_EXTENSIONS.includes(ext) || ALLOWED_MIME_TYPES.includes(file.type);
-  };
-
+  // ---- Loading audio ----
+  const handleDragEnter = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); if (e.target === dropZoneRef.current) setIsDragging(false); };
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      if (isAllowedAudioFile(file)) {
-        processAudioFile(file);
-      } else {
-        toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
-      }
-    }
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (isAllowedAudioFile(file)) processAudioFile(file);
+    else toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
+  };
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (isAllowedAudioFile(file)) processAudioFile(file);
+    else toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
   };
 
   // Everything that must be cleared when a different piece of audio comes in
   const resetForNewAudio = () => {
     setError(null);
-    setAnalysis(null);
-    setWavetableData(null);
-    setDetectedInstruments(null);
-    setTrackInfo(null); // the header chip (and any batch waiting on it) belongs to the new file
+    setTrackInfo(null);
     audio.reset();
     handleClearLoop();
-    clearStems(); // Clear any previous stems when new file is uploaded
-    setPlayingStem(null);
-    // Clear stem waveform state
-    setActiveStemView(null);
-    setStemWaveformPreview(null);
-    stemWaveformHiResRef.current = null;
-    stemWaveformColorRef.current = null;
-    stemWaveformDataRef.current = {};
-    setStemLoopRegions({});
-    // Reset step flow
-    setExpandedSteps(new Set([1]));
-    setCompletedSteps(new Set());
+    clearStems();
+    setGridOffset(0);
+    setSections(null);
+    setSectionsSource(null);
+    sectionsKeyRef.current = '';
   };
 
   const processAudioFile = (file) => {
     resetForNewAudio();
-    const filename = file.name.replace(/\.[^/.]+$/, "");
+    const filename = file.name.replace(/\.[^/.]+$/, '');
     setAudioMetadata({ title: filename, artist: 'Unknown Artist', sourceFilename: file.name });
-
     const reader = new FileReader();
-    reader.onload = (event) => {
-      setAudioFileData(event.target.result);
-    };
+    reader.onload = (event) => setAudioFileData(event.target.result);
     reader.readAsArrayBuffer(file);
   };
 
@@ -807,13 +314,10 @@ export function Analyze({ theme, t }) {
       : `Loaded ${meta.artist ? `${meta.artist} — ` : ''}${meta.title}`);
   };
 
-
-  // Stem separation handlers
-  // Metadata used for stamped stem filenames + Remix Pack notes. Prefers the full
-  // analysis when it exists, falls back to the quick post-decode detection.
+  // Metadata for stamped stem filenames + Remix Pack notes
   const stemMeta = React.useMemo(() => {
-    const bpmInfo = analysis?.features?.bpm || trackInfo?.bpm || null;
-    const keyInfo = analysis?.features?.key || trackInfo?.key || null;
+    const bpmInfo = trackInfo?.bpm || null;
+    const keyInfo = trackInfo?.key || null;
     return {
       artist: audioMetadata.artist,
       title: audioMetadata.title,
@@ -823,9 +327,9 @@ export function Analyze({ theme, t }) {
       doubleTempo: bpmInfo?.doubleTempo ?? null,
       key: keyInfo ? { key: keyInfo.key, mode: keyInfo.mode, camelot: keyInfo.camelot, compatibleKeys: keyInfo.compatibleKeys, confidence: keyInfo.confidence, alternatives: keyInfo.alternatives } : null,
     };
-  }, [analysis?.features?.bpm, analysis?.features?.key, trackInfo, audioMetadata.artist, audioMetadata.title]);
+  }, [trackInfo, audioMetadata.artist, audioMetadata.title]);
 
-  // ---- Vault: save when stems are ready, update when stems are kept ----
+  // ---- Vault: save when stems are ready, again as stems are kept or sections change ----
   const vaultUpsertRef = useRef(vault.upsertTrack);
   useEffect(() => { vaultUpsertRef.current = vault.upsertTrack; }, [vault.upsertTrack]);
 
@@ -855,8 +359,11 @@ export function Analyze({ theme, t }) {
       audioUrl: audioBlobUrl,
       mode: separationMode,
       stems: stemEntries,
+      gridOffset,
+      sections: sections || [],
+      sectionsSource: sectionsSource || null,
     });
-  }, [separationStatus, stems, keepStatus, audioBlobUrl, separationMode, stemAudioData, audioMetadata, audio.duration, stemMeta.bpm, stemMeta.key]);
+  }, [separationStatus, stems, keepStatus, audioBlobUrl, separationMode, stemAudioData, audioMetadata, audio.duration, stemMeta.bpm, stemMeta.key, gridOffset, sections, sectionsSource]);
 
   // ---- Vault: restore a full session from /?track=<id> ----
   const restoreStemsRef = useRef(restoreStems);
@@ -865,11 +372,8 @@ export function Analyze({ theme, t }) {
   useEffect(() => { getTrackRef.current = vault.getTrack; }, [vault.getTrack]);
   const lastRestoredRef = useRef(null);
 
-  const [reseparate, setReseparate] = useState(null); // { mode, existingUrl } set by ?track=<id>&mode=stems4
-
   useEffect(() => {
     const trackId = searchParams.get('track');
-    const modeParam = searchParams.get('mode');
     if (!trackId || trackId === lastRestoredRef.current) return;
     const track = getTrackRef.current(trackId);
     if (!track) return; // vault may still be loading — effect re-runs when tracks change
@@ -893,16 +397,15 @@ export function Analyze({ theme, t }) {
           sourceUrl: track.sourceUrl || null,
           source: track.source || null,
         });
+        setGridOffset(track.gridOffset || 0);
+        if (Array.isArray(track.sections) && track.sections.length) {
+          setSections(track.sections);
+          setSectionsSource(track.sectionsSource || 'manual');
+        }
         setAudioFileData(buffer);
         const stemUrls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]).filter(([, u]) => u));
-        if (modeParam && SEPARATION_MODES.some(m => m.id === modeParam)) {
-          // Re-separate with a different mode: the source stays on Blob, so the vault entry updates in place
-          setReseparate({ mode: modeParam, existingUrl: track.audioUrl });
-          toast.success(`Re-separating ${track.title} as ${SEPARATION_MODES.find(m => m.id === modeParam).label}`);
-        } else {
-          if (Object.keys(stemUrls).length) restoreStemsRef.current(stemUrls, track.audioUrl, track.mode);
-          toast.success(`Restored ${track.artist ? `${track.artist} — ` : ''}${track.title}`);
-        }
+        if (Object.keys(stemUrls).length) restoreStemsRef.current(stemUrls, track.audioUrl, track.mode);
+        toast.success(`Restored ${track.artist ? `${track.artist} — ` : ''}${track.title}`);
       } catch (err) {
         setError(err.message || 'Could not restore this track.');
       } finally {
@@ -913,448 +416,77 @@ export function Analyze({ theme, t }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, vault.tracks]);
 
-  const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best', existingUrl } = {}) => {
+  // ---- Stems ----
+  const handleSeparateStems = useCallback(async ({ mode = 'vocals', quality = 'best' } = {}) => {
     if (!audioFileData) return;
     if (!isSignedIn) {
       setSignInReason('Stem separation runs on a paid GPU — unlock the lab first.');
       setShowSignIn(true);
       return;
     }
-
     // Preserve the real extension so the Blob upload gets the right MIME type
     const ext = (audioMetadata.sourceFilename || '').split('.').pop()?.toLowerCase();
-    const safeExt = ['wav', 'mp3', 'm4a', 'flac'].includes(ext) ? ext : 'mp3';
+    const safeExt = ALLOWED_EXTENSIONS.includes(ext) ? ext : 'mp3';
     const filename = `${audioMetadata.title || 'audio'}.${safeExt}`;
-
-    await separateStems(audioFileData, filename, { mode, quality, meta: stemMeta, existingUrl });
+    await separateStems(audioFileData, filename, { mode, quality, meta: stemMeta });
   }, [audioFileData, audioMetadata.title, audioMetadata.sourceFilename, separateStems, stemMeta, isSignedIn]);
 
-  // Kick off a re-separation once the restored audio (and its quick BPM/key) is in
-  useEffect(() => {
-    if (!reseparate || !audioFileData || !trackInfo) return;
-    const { mode, existingUrl } = reseparate;
-    setReseparate(null);
-    handleSeparateStems({ mode, quality: 'best', existingUrl });
-  }, [reseparate, audioFileData, trackInfo, handleSeparateStems]);
-
   const handleDownloadPack = useCallback(async () => {
-    const ok = await downloadRemixPack(stemMeta);
+    const ok = await downloadRemixPack(stemMeta, { sections, gridOffset });
     if (ok) toast.success('Remix Pack downloaded');
-  }, [downloadRemixPack, stemMeta, toast]);
+  }, [downloadRemixPack, stemMeta, sections, gridOffset, toast]);
 
   // Helper writes stems into ~/Music/Remix Lab/Stems/<Artist - Title>/ → Live's browser
   const handleSaveToLive = useCallback(async () => {
     if (!stems) return;
     const urls = Object.fromEntries(stemTypes.map(type => [type, stems[type]]).filter(([, u]) => u));
     try {
-      const result = await saveStemsToLive(urls, stemMeta, separationMode);
+      const result = await saveStemsToLive(urls, stemMeta, separationMode, { sections, gridOffset });
       toast.success(`${result.files.length - 1} stems saved to Remix Lab › Stems › ${result.dir.split('/').pop()}`);
     } catch (err) {
       toast.error(err.message || 'Could not save stems');
     }
-  }, [stems, stemTypes, stemMeta, separationMode, toast]);
-
-  // ---- Batch grab: playlist → grab → separate vocals → keep, one track after another ----
-  // Effect-driven state machine because separateStems() returns as soon as polling starts;
-  // each phase watches the hook state it needs and moves on when it settles.
-  const [batch, setBatch] = useState(null); // { items, index, phase, log, done }
-  const batchStepRef = useRef('');          // `${index}:${phase}` currently in flight
-  const batchTimerRef = useRef(null);
-  const batchFnsRef = useRef({});
-  batchFnsRef.current = { grab: helper.grab, handleImported, handleSeparateStems };
-
-  const handleBatch = useCallback((items) => {
-    if (!isSignedIn) {
-      setSignInReason('Batch grabbing separates vocals on a paid GPU — unlock the lab first.');
-      setShowSignIn(true);
-      return;
-    }
-    batchStepRef.current = '';
-    setBatch({ items, index: 0, phase: 'grab', log: [], done: false });
-  }, [isSignedIn]);
-
-  const cancelBatch = useCallback(() => {
-    batchStepRef.current = '';
-    clearTimeout(batchTimerRef.current);
-    setBatch(null);
-  }, []);
-
-  const advanceBatch = useCallback((status, error) => {
-    clearTimeout(batchTimerRef.current);
-    setBatch(prev => {
-      if (!prev) return prev;
-      const log = [...prev.log];
-      log[prev.index] = { status, error };
-      const next = prev.index + 1;
-      if (next >= prev.items.length) return { ...prev, log, done: true, phase: 'done' };
-      return { ...prev, log, index: next, phase: 'grab' };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!batch || batch.done) return;
-    const key = `${batch.index}:${batch.phase}`;
-    const item = batch.items[batch.index];
-    const setPhase = (phase) => setBatch(prev => (prev && !prev.done ? { ...prev, phase } : prev));
-    const fns = batchFnsRef.current;
-
-    if (batch.phase === 'grab') {
-      if (batchStepRef.current === key) return;
-      batchStepRef.current = key;
-      (async () => {
-        try {
-          const imported = await fns.grab(item.url);
-          if (batchStepRef.current !== key) return; // cancelled meanwhile
-          fns.handleImported(imported);
-          setPhase('load');
-        } catch (err) {
-          if (batchStepRef.current === key) advanceBatch('error', err.message || 'download failed');
-        }
-      })();
-      return;
-    }
-
-    if (batch.phase === 'load') {
-      // Wait for the quick BPM / key so stem filenames and the vault entry get stamped
-      if (batchStepRef.current !== key) {
-        batchStepRef.current = key;
-        batchTimerRef.current = setTimeout(() => setPhase('separate'), 15000);
-      }
-      if (audioFileData && trackInfo) {
-        clearTimeout(batchTimerRef.current);
-        setPhase('separate');
-      }
-      return;
-    }
-
-    if (batch.phase === 'separate') {
-      if (batchStepRef.current !== key) {
-        batchStepRef.current = key;
-        fns.handleSeparateStems({ mode: 'vocals', quality: 'best' });
-        return;
-      }
-      if (separationStatus === 'ready') setPhase('keep');
-      else if (separationStatus === 'error') advanceBatch('error', separationError || 'separation failed');
-      return;
-    }
-
-    if (batch.phase === 'keep') {
-      if (batchStepRef.current !== key) {
-        batchStepRef.current = key;
-        // Keep normally finishes in ~10 s; don't let a stuck upload stall the whole queue
-        batchTimerRef.current = setTimeout(() => advanceBatch('done'), 180000);
-      }
-      const states = stemTypes.map(type => keepStatus[type]);
-      if (states.length && states.every(st => st === 'saved' || st === 'error')) {
-        advanceBatch(states.includes('error') ? 'error' : 'done', states.includes('error') ? 'keep failed — stems still in the vault until they expire' : undefined);
-      }
-    }
-  }, [batch, audioFileData, trackInfo, separationStatus, separationError, keepStatus, stemTypes, advanceBatch]);
-
-  useEffect(() => () => clearTimeout(batchTimerRef.current), []);
-
-  // Vocal chop kit reads the decoded vocal straight out of the Stem Player
-  const getVocalBuffer = useCallback(() => stemPlayer.getBuffer('vocals'), [stemPlayer.getBuffer]);
-  const handleChopSeek = useCallback((time) => { stemPlayer.seek(time); stemPlayer.play(time); }, [stemPlayer.seek, stemPlayer.play]);
+  }, [stems, stemTypes, stemMeta, separationMode, sections, gridOffset, toast]);
 
   const handleKeepStem = useCallback((stemType) => keepStem(stemType, stemMeta), [keepStem, stemMeta]);
   const handleKeepAll = useCallback(() => keepAllStems(stemMeta), [keepAllStems, stemMeta]);
-
+  const handleDownloadStem = useCallback((stemType) => downloadStemFile(stemType, stemMeta), [downloadStemFile, stemMeta]);
   const handleResetStems = useCallback(() => {
+    pauseStems();
     clearStems();
-    setActiveStemView(null);
-    setPlayingStem(null);
-  }, [clearStems]);
-
-  const handlePlayStem = useCallback(async (stemType) => {
-    if (!stems || !stems[stemType]) return;
-
-    // If already playing this stem, toggle it off
-    if (playingStem === stemType && audio.isPlaying) {
-      // Toggle will stop playback since it's currently playing
-      await audio.togglePlayback(stemAudioData[stemType]);
-      setPlayingStem(null);
-      return;
-    }
-
-    // Stop any current playback (without destroying waveform/duration via reset)
-    if (audio.isPlaying) {
-      // Toggle the current audio to stop it
-      await audio.togglePlayback(audioFileData);
-    }
-
-    // Get the stem audio data (download if needed)
-    let audioData = stemAudioData[stemType];
-    if (!audioData) {
-      audioData = await getStemAudio(stemType);
-    }
-
-    if (audioData) {
-      stemPlayer.pause();
-      setPlayingStem(stemType);
-      const result = await audio.togglePlayback(audioData);
-      if (result.error) {
-        setError(result.error);
-        setPlayingStem(null);
-      }
-    }
-  }, [stems, stemAudioData, playingStem, audio, getStemAudio, audioFileData, stemPlayer.pause]);
-
-  const handleDownloadStem = useCallback(async (stemType) => {
-    if (!stems || !stems[stemType]) return;
-    await downloadStemFile(stemType, stemMeta);
-  }, [stems, downloadStemFile, stemMeta]);
-
-  const handleSelectStem = useCallback(async (stemType) => {
-    setSelectedInstrument(stemType);
-    // Stop playing stem when selection changes
-    if (playingStem && playingStem !== stemType && audio.isPlaying) {
-      audio.reset();
-      setPlayingStem(null);
-    }
-    // Activate stem waveform view
-    const stemTypes = ['vocals', 'drums', 'bass', 'other'];
-    if (stemTypes.includes(stemType)) {
-      const stemData = await prepareStemWaveform(stemType);
-      if (stemData) {
-        setActiveStemView(stemType);
-        setStemWaveformPreview(stemData.preview);
-        stemWaveformHiResRef.current = stemData.hiRes;
-        stemWaveformColorRef.current = stemData.colors;
-      }
-    } else {
-      // Back to full mix
-      setActiveStemView(null);
-      setStemWaveformPreview(null);
-      stemWaveformHiResRef.current = null;
-      stemWaveformColorRef.current = null;
-    }
-  }, [playingStem, audio, prepareStemWaveform]);
-
-  // Handle per-stem Analyze button click — activates stem waveform + runs analysis
-  const handleAnalyzeStem = useCallback(async (stemType) => {
-    // Switch waveform to show this stem (if not already)
-    if (activeStemView !== stemType) {
-      const stemData = await prepareStemWaveform(stemType);
-      if (stemData) {
-        setActiveStemView(stemType);
-        setStemWaveformPreview(stemData.preview);
-        stemWaveformHiResRef.current = stemData.hiRes;
-        stemWaveformColorRef.current = stemData.colors;
-      }
-    }
-    await runAnalysis(stemType);
-  }, [runAnalysis, activeStemView, prepareStemWaveform]);
-
-  // Scroll helpers for full-mix guidance
-  const scrollToStems = useCallback(() => {
-    stemSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, []);
-
-  const scrollToWaveform = useCallback(() => {
-    waveformSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, []);
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (isAllowedAudioFile(file)) {
-        processAudioFile(file);
-      } else {
-        toast.error('Unsupported format. Please upload a WAV, MP3, M4A or FLAC file.');
-      }
-    }
-  };
-
-  // Preset selection callback from PresetSelector (fires on select, NOT download)
-  const handlePresetSelected = () => {
-  };
-
-  // Preset download callback — fires only when user actually downloads a .vital file
-  const handlePresetDownloaded = useCallback(() => {
-    setCompletedSteps(prev => new Set([...prev, 2]));
-    setExpandedSteps(prev => {
-      const next = new Set(prev);
-      next.add(3);
-      return next;
-    });
-  }, []);
-
-  // Step flow toggle handler
-  const toggleStep = useCallback((stepNum) => {
-    setExpandedSteps(prev => {
-      const next = new Set(prev);
-      if (next.has(stepNum)) next.delete(stepNum);
-      else next.add(stepNum);
-      return next;
-    });
-  }, []);
-
-  const copyToClipboard = async () => {
-    if (!analysis) return;
-
-    const features = analysis.features;
-    const recommendations = analysis.recommendations;
-
-    const text = `Audio Analysis: ${audioMetadata.title}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Features:
-- RMS: ${features.rms}
-- Brightness: ${features.brightness}
-- Spectral Centroid: ${features.spectralCentroid} Hz
-- Harmonicity: ${features.harmonicity}
-- Attack: ${features.attackTime}ms
-${features.bpm ? `- BPM: ${features.bpm.bpm}` : ''}
-${features.key ? `- Key: ${features.key.scale}` : ''}
-
-Synthesis Type:
-${recommendations.synthType.map(r => '- ' + r).join('\n')}
-
-Recommended VSTs:
-${recommendations.vstSuggestions.map(r => '- ' + r).join('\n')}
-
-DAW Instruments:
-${recommendations.nativeInstruments.map(r => '- ' + r).join('\n')}
-
-Oscillator:
-${recommendations.oscillatorSettings.map(r => '- ' + r).join('\n')}
-
-Filter:
-${recommendations.filterSettings.map(r => '- ' + r).join('\n')}
-
-Envelope:
-${recommendations.envelopeSettings.map(r => '- ' + r).join('\n')}
-
-EQ:
-${recommendations.eqSettings.map(r => '- ' + r).join('\n')}
-
-Effects:
-${recommendations.effects.map(r => '- ' + r).join('\n')}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generated by SoundSauce`;
-
-    await navigator.clipboard.writeText(text);
-  };
-
-  const buildShareData = useCallback(() => {
-    if (!analysis) return { text: '', title: '', instrument: '' };
-
-    const features = analysis.features;
-    const title = audioMetadata.title || 'Untitled';
-    const instrument = selectedInstrument !== 'full'
-      ? instrumentLabels[selectedInstrument]?.label || selectedInstrument
-      : '';
-
-    // Top detected instrument with confidence
-    const topInstrument = analysis.detectedInstruments?.[0];
-    const detectedLine = topInstrument
-      ? `Detected: ${instrumentLabels[topInstrument.instrument]?.label || topInstrument.instrument} (${topInstrument.confidence}%)`
-      : '';
-
-    const bpmVal = features.bpm?.bpm;
-    const keyVal = features.key?.scale;
-    const waveformVal = features.waveform?.type;
-    const brightnessVal = typeof features.brightness === 'number'
-      ? features.brightness.toFixed(2)
-      : features.brightness;
-    const attackVal = features.attackTime;
-
-    const parts = [
-      bpmVal ? `BPM: ${bpmVal}` : '',
-      keyVal ? `Key: ${keyVal}` : '',
-      waveformVal ? `Waveform: ${waveformVal}` : '',
-    ].filter(Boolean).join(' | ');
-
-    const details = [
-      brightnessVal ? `Brightness: ${brightnessVal}` : '',
-      attackVal ? `Attack: ${attackVal}ms` : '',
-    ].filter(Boolean).join(' | ');
-
-    const lines = [
-      `Sound Analysis — ${title}${instrument ? ` (${instrument})` : ''}`,
-      '',
-      parts,
-      details,
-      detectedLine,
-      '',
-      'Analyzed with SoundSauce — soundsauce.app',
-    ].filter(line => line !== undefined);
-
-    return {
-      text: lines.join('\n'),
-      title: `Sound Analysis — ${title}`,
-      instrument: selectedInstrument,
-    };
-  }, [analysis, audioMetadata.title, selectedInstrument]);
+  }, [clearStems, pauseStems]);
 
   const handleSeek = (e) => {
     if (!audio.audioBuffer || !audio.duration) return;
-
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = x / rect.width;
-    const newTime = percentage * audio.duration;
-
-    audio.seek(newTime);
+    seek(((e.clientX - rect.left) / rect.width) * audio.duration);
   };
+
+  const barSec = stemMeta.bpm ? 240 / stemMeta.bpm : 0;
+  const sectionsNote = sectionsSource === 'manual' ? 'edited' : sectionsSource === 'stems' ? 'from stems' : sectionsSource === 'mix' ? 'from the mix' : undefined;
 
   return (
     <div className={`${t.text} p-4 md:p-8`}>
       <div className="max-w-7xl mx-auto">
         {error && (
-          <div className={`rounded-xl p-5 mb-6 backdrop-blur ${
-            theme === 'dark'
-              ? 'bg-red-500/10 border border-red-500/50'
-              : 'bg-red-50 border border-red-200'
-          }`}>
+          <div className={`rounded-xl p-5 mb-6 backdrop-blur ${theme === 'dark' ? 'bg-red-500/10 border border-red-500/50' : 'bg-red-50 border border-red-200'}`}>
             <div className="flex items-start gap-3">
               <AlertTriangle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${theme === 'dark' ? 'text-red-400' : 'text-red-600'}`} />
               <div className="flex-1 min-w-0">
                 <p className={`font-medium mb-1 ${theme === 'dark' ? 'text-red-300' : 'text-red-700'}`}>{error}</p>
-                {/* Recovery actions — shown when no audio is loaded (e.g. failed session restore) */}
                 {!audioFileData && (
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <button
-                      onClick={() => {
-                        setError(null);
-                      }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                        theme === 'dark'
-                          ? 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
-                          : 'bg-white text-stone-800 border border-stone-300 hover:bg-stone-50'
-                      }`}
-                    >
-                      Start a New Analysis
-                    </button>
-                    <button
-                      onClick={() => {
-                        setError(null);
-                        // Scroll to the upload area which is now visible after error is cleared
-                        setTimeout(() => {
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }, 50);
-                      }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                        theme === 'dark'
-                          ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600'
-                          : 'bg-ember-600 text-white hover:bg-ember-700'
-                      }`}
-                    >
-                      <UploadCloud className="w-4 h-4" />
-                      Upload Audio
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => { setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    className={`mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${theme === 'dark' ? 'bg-ember-500 text-zinc-950 hover:bg-ember-600' : 'bg-ember-600 text-white hover:bg-ember-700'}`}
+                  >
+                    <UploadCloud className="w-4 h-4" /> Load another track
+                  </button>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Sound Analyzer */}
-        <>
-        {/* Vault restore in progress */}
         {restoringTrack && (
           <div className={`flex items-center gap-3 p-3 mb-4 rounded-lg border font-mono text-[12px] ${theme === 'dark' ? 'bg-[#0D0F12] border-[#1C2027] text-[#9AA4B0]' : 'bg-white border-[#D9DDE3] text-[#4B5563]'}`}>
             <Loader2 className="w-4 h-4 animate-spin text-ember-500" />
@@ -1363,9 +495,9 @@ Generated by SoundSauce`;
         )}
 
         {/* Paste a link / search — via the local helper */}
-        <LinkImport helper={helper} onImported={handleImported} onBatch={handleBatch} batch={batch} onCancelBatch={cancelBatch} disabled={!!batch && !batch.done} hero={!audioFileData && !analysis} theme={theme} t={t} />
+        <LinkImport helper={helper} onImported={handleImported} hero={!audioFileData} theme={theme} t={t} />
 
-        {/* Upload Section with Drag & Drop */}
+        {/* Drop zone (a panel when nothing is loaded, one line afterwards) */}
         <AudioUploadSection
           isDragging={isDragging}
           onFileUpload={handleFileUpload}
@@ -1373,7 +505,7 @@ Generated by SoundSauce`;
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
-          showWelcome={!audioFileData && !analysis}
+          showWelcome={!audioFileData}
           dropZoneRef={dropZoneRef}
           theme={theme}
           t={t}
@@ -1381,7 +513,7 @@ Generated by SoundSauce`;
 
         {audioFileData && (
           <div className={`p-6 mb-6 border ${t.cardAlt}`}>
-            {/* Audio Metadata Header — Signal Deck: artwork, Syne title, mono readout, spectrum chips */}
+            {/* Track header — artwork, Syne title, mono readout, BPM / key chips */}
             <div className="flex items-center gap-4 mb-2">
               <div className={`w-16 h-16 flex items-center justify-center rounded-md overflow-hidden flex-shrink-0 border ${
                 theme === 'dark' ? 'bg-[#14171C] border-[#1C2027]' : 'bg-[#EDEFF3] border-[#D9DDE3]'
@@ -1400,7 +532,7 @@ Generated by SoundSauce`;
                   {audioMetadata.source ? ` — ${audioMetadata.source}` : ''}
                 </p>
               </div>
-              {audioMetadata.importFilename && audioFileData && (
+              {audioMetadata.importFilename && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1437,231 +569,118 @@ Generated by SoundSauce`;
             </div>
             <div className="rule-spectrum mb-6 opacity-80" aria-hidden="true" />
 
-            {/* Waveform Display with Loop Selection — user browses & selects region first */}
-            <div ref={waveformSectionRef} />
-            {activeStemView && (
-              <div className={`flex items-center justify-between px-3 py-2 mb-1 rounded-t-lg text-sm ${
-                theme === 'dark' ? 'bg-zinc-800 text-white' : 'bg-amber-50/50 text-ember-600'
-              }`}>
-                <span className="font-medium">
-                  Viewing: <span className="capitalize">{activeStemView}</span> stem
-                </span>
-                <button
-                  onClick={() => {
-                    setActiveStemView(null);
-                    setStemWaveformPreview(null);
-                    stemWaveformHiResRef.current = null;
-                    stemWaveformColorRef.current = null;
-                  }}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
-                    theme === 'dark'
-                      ? 'hover:bg-zinc-800 text-zinc-400 hover:text-white'
-                      : 'hover:bg-amber-100 text-zinc-500 hover:text-ember-600'
-                  }`}
-                >
-                  <ArrowLeft className="w-3 h-3" />
-                  Back to Full Mix
-                </button>
-              </div>
-            )}
-            <WaveformVisualizer
-              waveformData={activeStemView ? stemWaveformPreview : audio.waveformData}
-              waveformHiResRef={activeStemView ? stemWaveformHiResRef : audio.waveformHiResRef}
-              waveformColorRef={activeStemView ? stemWaveformColorRef : audio.waveformColorRef}
-              duration={activeStemView && stemWaveformDataRef.current[activeStemView] ? stemWaveformDataRef.current[activeStemView].duration : audio.duration}
-              playbackTime={audio.playbackTime}
-              playbackTimeRef={audio.playbackTimeRef}
-              loopStart={activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart}
-              loopEnd={activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd}
-              loopEnabled={activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled}
-              onToggleLoop={handleToggleViewLoop}
-              onClearLoop={handleClearViewLoop}
-              onSeek={handleWaveformSeek}
-              onLoopRegionChange={handleViewLoopRegionChange}
-              formatTime={audio.formatTime}
-              theme={theme}
-              t={t}
-            />
-
-            {/* Spectrum Visualizer — only show when playing */}
-            {(audio.isPlaying || audio.spectrumData.length > 0) && (
-              <SpectrumAnalyzer
-                spectrumData={audio.spectrumData}
-                brightness={audio.brightness}
-                isPlaying={audio.isPlaying}
-                loopEnabled={audio.loopEnabled}
-                theme={theme}
-                t={t}
-              />
-            )}
-
-            {/* Playback Controls */}
-            <PlaybackControls
-              isPlaying={audio.isPlaying}
-              playbackTime={audio.playbackTime}
-              duration={audio.duration}
-              volume={audio.volume}
-              loopStart={audio.loopStart}
-              loopEnd={audio.loopEnd}
-              loopEnabled={audio.loopEnabled}
-              onTogglePlayback={handleTogglePlayback}
-              onSeek={handleSeek}
-              onVolumeChange={audio.setVolume}
-              formatTime={audio.formatTime}
-              theme={theme}
-              t={t}
-            />
-
-            <div>
-            {/* Stem separation — always visible for non-short audio */}
-            {audio.duration > 15 && (
-              <div className="mb-6" ref={stemSectionRef}>
-                <StemSelector
-                  stems={stems}
-                  stemAudioData={stemAudioData}
-                  separationStatus={separationStatus}
-                  separationProgress={separationProgress}
-                  separationError={separationError}
-                  selectedStem={selectedInstrument}
-                  onSelectStem={handleSelectStem}
-                  playingStem={playingStem}
-                  onAnalyzeStem={handleAnalyzeStem}
-                  analyzingStem={analyzingStemType}
-                  analyzedStem={analysis?.analyzedStem || null}
-                  stemTypes={stemTypes}
-                  mode={separationMode}
-                  keepStatus={keepStatus}
-                  onSeparate={handleSeparateStems}
-                  onPlayStem={handlePlayStem}
-                  onDownloadStem={handleDownloadStem}
-                  onDownloadPack={handleDownloadPack}
-                  onSaveToLive={helper.online ? handleSaveToLive : null}
-                  onKeepStem={handleKeepStem}
-                  onKeepAll={handleKeepAll}
-                  onReset={handleResetStems}
-                  onCancel={cancelSeparation}
-                  spectrumDataRef={audio.spectrumDataRef}
-                  hasAudio={!!audioFileData}
+            {/* Full-mix timeline — until the stems take over */}
+            {!stemsReady && (
+              <>
+                {(sections || sectionsDetecting) && (
+                  <div className={`mb-2 py-1.5 rounded-md border ${theme === 'dark' ? 'bg-[#0D0F12] border-[#1C2027]' : 'bg-white border-[#D9DDE3]'}`}>
+                    <SectionStrip
+                      sections={sections}
+                      duration={audio.duration}
+                      barSec={barSec}
+                      gridOffset={gridOffset}
+                      positionRef={audio.playbackTimeRef}
+                      onChange={handleSectionsChange}
+                      onSeek={handleSectionSeek}
+                      formatTime={audio.formatTime}
+                      theme={theme}
+                      detecting={sectionsDetecting}
+                      note={sectionsNote}
+                    />
+                  </div>
+                )}
+                <WaveformVisualizer
+                  waveformData={audio.waveformData}
+                  waveformHiResRef={audio.waveformHiResRef}
+                  waveformColorRef={audio.waveformColorRef}
+                  duration={audio.duration}
+                  playbackTime={audio.playbackTime}
+                  playbackTimeRef={audio.playbackTimeRef}
+                  loopStart={audio.loopStart}
+                  loopEnd={audio.loopEnd}
+                  loopEnabled={audio.loopEnabled}
+                  onToggleLoop={handleToggleLoop}
+                  onClearLoop={handleClearLoop}
+                  onSeek={handleWaveformSeek}
+                  onLoopRegionChange={handleLoopRegionChange}
+                  formatTime={audio.formatTime}
                   theme={theme}
                   t={t}
                 />
-                {separationStatus === 'ready' && stemTypes.length > 0 && (
-                  <div className="mt-4 space-y-4">
-                    <StemPlayer
-                      player={stemPlayer}
-                      stemTypes={stemTypes}
-                      mode={separationMode}
-                      bpm={stemMeta.bpm}
-                      theme={theme}
-                      formatTime={audio.formatTime}
-                    />
-                    <TrackAnatomy
-                      player={stemPlayer}
-                      stemTypes={stemTypes}
-                      mode={separationMode}
-                      bpm={stemMeta.bpm}
-                      keyInfo={stemMeta.key}
-                      analyzeStemAnatomy={audio.analyzeStemAnatomy}
-                      theme={theme}
-                      formatTime={audio.formatTime}
-                    />
-                    {stemTypes.includes('vocals') && (
-                      <VocalChopKit
-                        getBuffer={getVocalBuffer}
-                        ready={stemPlayer.status === 'ready'}
-                        meta={stemMeta}
-                        mode={separationMode}
-                        helperOnline={helper.online}
-                        onSeek={handleChopSeek}
-                        onToast={toast.success}
-                        onError={toast.error}
-                        theme={theme}
-                        formatTime={audio.formatTime}
-                      />
-                    )}
-                  </div>
+                {(audio.isPlaying || audio.spectrumData.length > 0) && (
+                  <SpectrumAnalyzer
+                    spectrumData={audio.spectrumData}
+                    brightness={audio.brightness}
+                    isPlaying={audio.isPlaying}
+                    loopEnabled={audio.loopEnabled}
+                    theme={theme}
+                    t={t}
+                  />
                 )}
+                <PlaybackControls
+                  isPlaying={audio.isPlaying}
+                  playbackTime={audio.playbackTime}
+                  duration={audio.duration}
+                  volume={audio.volume}
+                  loopStart={audio.loopStart}
+                  loopEnd={audio.loopEnd}
+                  loopEnabled={audio.loopEnabled}
+                  onTogglePlayback={handleTogglePlayback}
+                  onSeek={handleSeek}
+                  onVolumeChange={audio.setVolume}
+                  formatTime={audio.formatTime}
+                  theme={theme}
+                  t={t}
+                />
+              </>
+            )}
+
+            {/* Stem Player + sections — the only timeline once stems exist */}
+            {stemsReady && (
+              <div className="mb-4">
+                <StemPlayer
+                  player={stemPlayer}
+                  stemTypes={stemTypes}
+                  mode={separationMode}
+                  bpm={stemMeta.bpm}
+                  gridOffset={gridOffset}
+                  onGridOffsetChange={setGridOffset}
+                  sections={sections}
+                  onSectionsChange={handleSectionsChange}
+                  sectionsDetecting={sectionsDetecting}
+                  sectionsNote={sectionsNote}
+                  theme={theme}
+                  formatTime={audio.formatTime}
+                />
               </div>
             )}
 
-            {/* Deeper analysis — the old analyzer flow (features, instrument, Vital recipe). Secondary to stems. */}
-            <AnalyzeSection
-              loopEnabled={activeStemView ? (stemLoopRegions[activeStemView]?.enabled ?? false) : audio.loopEnabled}
-              loopStart={activeStemView ? (stemLoopRegions[activeStemView]?.start ?? null) : audio.loopStart}
-              loopEnd={activeStemView ? (stemLoopRegions[activeStemView]?.end ?? null) : audio.loopEnd}
-              formatTime={audio.formatTime}
-              isAnalyzing={isAnalyzing}
-              onAnalyze={activeStemView ? () => runAnalysis(activeStemView) : runAnalysis}
-              theme={theme}
-            />
-            </div>
-
-            {/* Detected Instruments — shown AFTER analysis (non-compact, outside step flow) */}
-            {detectedInstruments && analysis && (() => {
-              const analyzedFullTrack = !analysis.analyzedStem && !(audio.loopEnabled && audio.loopStart != null);
-              const isLongAudio = audio.duration > 10;
-              const multipleInstruments = (detectedInstruments.instrumentsAboveThreshold || 0) >= 3;
-              const shouldShowMixGuidance = isLongAudio && (detectedInstruments.isFullMix || (analyzedFullTrack && multipleInstruments));
-
-              // Only show standalone InstrumentSelector when mix guidance is needed
-              // Otherwise, the compact version lives inside Step 1
-              if (!shouldShowMixGuidance) return null;
-
-              return (
-              <InstrumentSelector
-                detectedInstruments={{ ...detectedInstruments, isFullMix: shouldShowMixGuidance }}
-                selectedInstrument={selectedInstrument}
-                onSelectInstrument={reAnalyzeWithInstrument}
-                instrumentLabels={instrumentLabels}
+            {/* Separate → progress → stem rows (keep / download / to Live / pack) */}
+            {audio.duration > 15 && (
+              <StemSelector
+                stems={stems}
+                stemAudioData={stemAudioData}
+                separationStatus={separationStatus}
+                separationProgress={separationProgress}
+                separationError={separationError}
+                stemTypes={stemTypes}
+                mode={separationMode}
+                keepStatus={keepStatus}
+                onSeparate={handleSeparateStems}
+                onDownloadStem={handleDownloadStem}
+                onDownloadPack={handleDownloadPack}
+                onSaveToLive={helper.online ? handleSaveToLive : null}
+                onKeepStem={handleKeepStem}
+                onKeepAll={handleKeepAll}
+                onReset={handleResetStems}
+                onCancel={cancelSeparation}
+                hasAudio={!!audioFileData}
                 theme={theme}
                 t={t}
-                onSeparateStems={scrollToStems}
-                onSelectRegion={scrollToWaveform}
-                hasStemsReady={stems !== null}
-                aiDetectionStatus={aiDetectionStatus}
               />
-              );
-            })()}
+            )}
           </div>
         )}
-
-        {/* ===== GUIDED STEP FLOW — post-analysis ===== */}
-        {analysis && (
-          <div className="space-y-4">
-            {/* Copy Button */}
-            <ExportToolbar
-              onCopy={copyToClipboard}
-              onShare={buildShareData}
-              theme={theme}
-            />
-
-            <div ref={resultsSectionRef} />
-
-            <AnalysisStepFlow
-              completedSteps={completedSteps}
-              expandedSteps={expandedSteps}
-              toggleStep={toggleStep}
-              theme={theme}
-              t={t}
-              analysis={analysis}
-              detectedInstruments={detectedInstruments}
-              selectedInstrument={selectedInstrument}
-              audio={audio}
-              audioFileData={audioFileData}
-              audioMetadata={audioMetadata}
-              wavetableData={wavetableData}
-              stems={stems}
-              aiDetectionStatus={aiDetectionStatus}
-              dawPreference={prefs.dawPreference}
-              reAnalyzeWithInstrument={reAnalyzeWithInstrument}
-              scrollToStems={scrollToStems}
-              scrollToWaveform={scrollToWaveform}
-              handlePresetSelected={handlePresetSelected}
-              handlePresetDownloaded={handlePresetDownloaded}
-            />
-          </div>
-        )}
-        </>
 
         {/* Lab sign-in — opened when a gated action (stem separation) is attempted while locked */}
         <LabSignIn
@@ -1670,7 +689,6 @@ Generated by SoundSauce`;
           theme={theme}
           reason={signInReason}
         />
-
       </div>
     </div>
   );

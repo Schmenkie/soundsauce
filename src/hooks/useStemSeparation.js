@@ -516,8 +516,9 @@ export function useStemSeparation() {
    * Save every stem plus a notes.txt (BPM, key, Camelot, compatible keys, Ableton tips)
    * as a single "Remix Pack" zip. Stored uncompressed — FLAC is already compressed.
    * @param {object} meta - { artist, title, bpm, key, ... }
+   * @param {{ sections?: object[], gridOffset?: number }} [extras] - section labels for notes.txt
    */
-  const downloadRemixPack = useCallback(async (meta = {}) => {
+  const downloadRemixPack = useCallback(async (meta = {}, extras) => {
     const buffers = await downloadAllStems();
     if (!buffers || Object.keys(buffers).length === 0) return false;
 
@@ -528,7 +529,7 @@ export function useStemSeparation() {
       const ext = extFromUrl(stemsRef.current[stemType]);
       entries[buildStemFilename(meta, stemType, currentMode, ext)] = new Uint8Array(buffers[stemType]);
     }
-    entries['notes.txt'] = strToU8(buildPackNotes(meta, stemTypes, currentMode));
+    entries['notes.txt'] = strToU8(buildPackNotes(meta, stemTypes, currentMode, extras));
 
     const zipped = zipSync(entries, { level: 0 });
     saveBlob(new Blob([zipped], { type: 'application/zip' }), buildPackFilename(meta));

@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput, NotebookPen, Pencil, Tag, Layers, ExternalLink } from 'lucide-react';
+import { Archive, Search, X, Download, Package, Trash2, FlaskConical, Lock, RefreshCw, Loader2, Music, Link2, Cloud, CloudOff, Calculator, FolderInput, Pencil, ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVault, usePageTitle, useHelper } from '../hooks';
 import { useToast } from '../components/ui/Toast';
@@ -27,16 +27,13 @@ function Chip({ children, color, theme, title }) {
   );
 }
 
-function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onPack, onSaveToLive, onStem, onKeep, onUpdate, onTagClick, busy }) {
+function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onPack, onSaveToLive, onStem, onKeep, onUpdate, busy }) {
   const isDark = theme === 'dark';
   const stems = STEM_ORDER.filter(k => track.stems?.[k]?.url);
   const keyName = track.key ? `${displayKeyName(track.key)} ${track.key.mode === 'minor' ? 'min' : 'maj'}` : null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ title: track.title || '', artist: track.artist || '' });
-  const [tagDraft, setTagDraft] = useState('');
-  const [addingTag, setAddingTag] = useState(false);
   const titleRef = useRef(null);
-  const tags = Array.isArray(track.tags) ? track.tags : [];
   const bytes = stems.reduce((sum, k) => sum + (track.stems[k].size || 0), 0);
   useEffect(() => { if (editing) titleRef.current?.focus(); }, [editing]);
 
@@ -47,13 +44,6 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
     if (!title) { setDraft({ title: track.title || '', artist: track.artist || '' }); return; }
     if (title !== track.title || artist !== (track.artist || '')) onUpdate(track, { title, artist: artist || null });
   };
-  const addTag = () => {
-    const tag = tagDraft.trim().toLowerCase().replace(/\s+/g, '-');
-    setTagDraft('');
-    setAddingTag(false);
-    if (tag && !tags.includes(tag)) onUpdate(track, { tags: [...tags, tag] });
-  };
-  const removeTag = (tag) => onUpdate(track, { tags: tags.filter(x => x !== tag) });
 
   const iconBtn = `w-9 h-9 flex items-center justify-center rounded-md border transition-colors ${
     isDark ? 'border-transparent text-[#7C8794] hover:border-[#2A3039] hover:text-[#E8ECF1]' : 'border-transparent text-[#6B7280] hover:border-[#B8BEC7] hover:text-[#0F1216]'
@@ -121,23 +111,6 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
         )}
       </div>
 
-      {/* Tags — only take space when there are some (or while adding) */}
-      {(tags.length > 0 || addingTag) && (
-        <div className="flex flex-wrap items-center gap-1 -mt-1">
-          {tags.map(tag => (
-            <span key={tag} className={`inline-flex items-center gap-0.5 pl-1.5 pr-1 h-5 rounded font-mono text-[10px] ${isDark ? 'bg-[#14171C] text-[#9AA4B0]' : 'bg-[#EDEFF3] text-[#4B5563]'}`}>
-              <button type="button" onClick={() => onTagClick(tag)} className="hover:text-ember-500" title={`Filter by #${tag}`}>#{tag}</button>
-              <button type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`} className="hover:text-red-500"><X className="w-2.5 h-2.5" /></button>
-            </span>
-          ))}
-          {addingTag && (
-            <form onSubmit={(e) => { e.preventDefault(); addTag(); }}>
-              <input autoFocus value={tagDraft} onChange={(e) => setTagDraft(e.target.value)} onBlur={addTag} onKeyDown={(e) => { if (e.key === 'Escape') { setTagDraft(''); setAddingTag(false); } }} aria-label="New tag" placeholder="tag" className={`w-24 h-5 px-1.5 rounded font-mono text-[10px] outline-none border ${isDark ? 'bg-[#0A0C0F] border-ember-500/60 text-[#E8ECF1]' : 'bg-white border-ember-600/60 text-[#0F1216]'}`} />
-            </form>
-          )}
-        </div>
-      )}
-
       {/* Stems */}
       <div className="flex flex-col gap-1.5">
         {stems.map((k) => {
@@ -202,7 +175,6 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
       <div className={`flex items-center justify-between -mb-1 -mx-1 pt-2 border-t ${isDark ? 'border-[#1C2027]' : 'border-[#EDEFF3]'}`}>
         <div className="flex items-center">
           <Link to={`/calc?track=${encodeURIComponent(track.id)}`} className={iconBtn} title="Remix Calculator — transpose / tempo for your project" aria-label={`Open ${track.title} in the calculator`}><Calculator className="w-4 h-4" /></Link>
-          <Link to={`/notes?track=${encodeURIComponent(track.id)}`} className={iconBtn} title="Remix notes" aria-label={`Notes for ${track.title}`}><NotebookPen className="w-4 h-4" /></Link>
           <button
             type="button"
             onClick={() => onSetReference(isReference ? null : track)}
@@ -213,10 +185,6 @@ function TrackCard({ track, theme, t, isReference, onSetReference, onRemove, onP
           >
             <Link2 className="w-4 h-4" />
           </button>
-          <button type="button" onClick={() => setAddingTag(true)} className={iconBtn} title="Add a tag" aria-label={`Add a tag to ${track.title}`}><Tag className="w-4 h-4" /></button>
-          {track.mode !== 'stems4' && (
-            <Link to={`/?track=${encodeURIComponent(track.id)}&mode=stems4`} className={iconBtn} title="Re-separate as 4 stems (vocals / drums / bass / other) — runs Demucs again" aria-label={`Re-separate ${track.title} as 4 stems`}><Layers className="w-4 h-4" /></Link>
-          )}
         </div>
         <div className="flex items-center">
           {track.sourceUrl && (
@@ -254,7 +222,6 @@ export function Vault({ theme, t }) {
 
   const [query, setQuery] = useState('');
   const [keyFilter, setKeyFilter] = useState(null); // Camelot code
-  const [tagFilter, setTagFilter] = useState(null);
   const [sort, setSort] = useState('newest');
   const [reference, setReference] = useState(null); // track for compatibility mode
   const [busy, setBusy] = useState(null);
@@ -274,7 +241,6 @@ export function Vault({ theme, t }) {
     const q = query.trim().toLowerCase();
     if (q) list = list.filter(tr => `${tr.title} ${tr.artist || ''} ${tr.key ? displayKeyName(tr.key) : ''} ${tr.key?.camelot || ''}`.toLowerCase().includes(q));
     if (keyFilter) list = list.filter(tr => tr.key?.camelot === keyFilter);
-    if (tagFilter) list = list.filter(tr => Array.isArray(tr.tags) && tr.tags.includes(tagFilter));
     if (reference) {
       const codes = compatibleCamelot(reference.key?.camelot);
       list = list.filter(tr => tr.id !== reference.id && (
@@ -288,7 +254,7 @@ export function Vault({ theme, t }) {
     if (sort === 'key') sorted.sort((a, b) => (parseInt(a.key?.camelot || '99') - parseInt(b.key?.camelot || '99')) || (a.key?.camelot || '').localeCompare(b.key?.camelot || ''));
     if (sort === 'title') sorted.sort((a, b) => (a.artist || a.title || '').localeCompare(b.artist || b.title || ''));
     return sorted;
-  }, [vault.tracks, query, keyFilter, tagFilter, reference, sort]);
+  }, [vault.tracks, query, keyFilter, reference, sort]);
 
   const trackMeta = (track) => ({
     artist: track.artist, title: track.title, bpm: track.bpm,
@@ -299,7 +265,7 @@ export function Vault({ theme, t }) {
     setBusy(`pack:${track.id}`);
     try {
       const urls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]));
-      await downloadRemixPackFromUrls(urls, trackMeta(track), track.mode || 'stems4');
+      await downloadRemixPackFromUrls(urls, trackMeta(track), track.mode || 'stems4', undefined, { sections: track.sections, gridOffset: track.gridOffset });
       toast.success('Remix Pack downloaded');
     } catch (err) {
       toast.error(err.message);
@@ -307,12 +273,6 @@ export function Vault({ theme, t }) {
       setBusy(null);
     }
   }, [toast]);
-
-  const tagCounts = useMemo(() => {
-    const counts = {};
-    for (const tr of vault.tracks) for (const tag of (Array.isArray(tr.tags) ? tr.tags : [])) counts[tag] = (counts[tag] || 0) + 1;
-    return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [vault.tracks]);
 
   const handleUpdate = useCallback((track, patch) => {
     vault.upsertTrack({ id: track.id, ...patch });
@@ -361,7 +321,7 @@ export function Vault({ theme, t }) {
     setBusy(`live:${track.id}`);
     try {
       const urls = Object.fromEntries(Object.entries(track.stems || {}).map(([k, v]) => [k, v?.url]));
-      const result = await saveStemsToLive(urls, trackMeta(track), track.mode || 'stems4');
+      const result = await saveStemsToLive(urls, trackMeta(track), track.mode || 'stems4', { sections: track.sections, gridOffset: track.gridOffset });
       toast.success(`${result.files.length - 1} stems saved to Remix Lab › Stems › ${result.dir.split('/').pop()}`);
     } catch (err) {
       toast.error(err.message);
@@ -475,30 +435,6 @@ export function Vault({ theme, t }) {
             )}
           </div>
 
-          {/* Tag chips */}
-          {tagCounts.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-3" role="group" aria-label="Filter by tag">
-              {tagCounts.map(([tag, n]) => {
-                const active = tagFilter === tag;
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => setTagFilter(active ? null : tag)}
-                    aria-pressed={active}
-                    className={`px-2 py-1 rounded border font-mono text-[11px] ${
-                      active
-                        ? isDark ? 'border-ember-500 text-ember-500 bg-[#14171C]' : 'border-ember-600 text-ember-700 bg-white'
-                        : isDark ? 'border-[#1C2027] text-[#9AA4B0] hover:border-[#2A3039]' : 'border-[#D9DDE3] text-[#4B5563] hover:border-[#B8BEC7]'
-                    }`}
-                  >
-                    #{tag} <span className="opacity-60">×{n}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Key chips */}
           {camelotCounts.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-4" role="group" aria-label="Filter by key">
@@ -572,7 +508,6 @@ export function Vault({ theme, t }) {
                   onStem={handleStem}
                   onKeep={handleKeep}
                   onUpdate={handleUpdate}
-                  onTagClick={(tag) => setTagFilter(tag)}
                   busy={busy}
                 />
               ))}

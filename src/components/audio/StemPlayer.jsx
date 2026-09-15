@@ -3,6 +3,7 @@ import { Play, Pause, Loader2, Repeat, X, Layers, ChevronLeft, ChevronRight, Map
 import { getStemLabel } from '../../utils/stemFiles';
 import { stemColor, SPECTRUM } from '../../utils/spectrum';
 import { WAVEFORM_COLUMNS, stemGain } from '../../hooks/useStemPlayer';
+import { SectionStrip } from './SectionStrip';
 
 const LANE_HEIGHT = 60;
 const LANE_GAP = 2;
@@ -18,21 +19,28 @@ const LABEL_WIDTH = 120;
  * - click a lane to seek · drag to loop (snaps to bars when the tempo is known)
  * - M / S per stem, "clear" resets the mix
  * - bar 1 defaults to 0:00; "set bar 1 here" pins the grid to the playhead, ◀ ▶ nudge it
- *   a beat either way for tracks with a pickup or a long intro
+ *   a beat either way for tracks with a pickup or a long intro (the offset lives in the
+ *   page so section detection and the vault see it too)
+ * - the SectionStrip above the lanes shows intro / breakdown / buildup / drop / outro
  *
  * @param {object} props
  * @param {ReturnType<import('../../hooks/useStemPlayer').useStemPlayer>} props.player
  * @param {string[]} props.stemTypes
  * @param {string} props.mode  separation mode (for stem labels)
  * @param {number|null} props.bpm
+ * @param {number} props.gridOffset  seconds — where bar 1 lands
+ * @param {(offset:number)=>void} props.onGridOffsetChange
+ * @param {object[]|null} props.sections  [{ label, start }] or null while detecting
+ * @param {(sections:object[])=>void} props.onSectionsChange
+ * @param {boolean} [props.sectionsDetecting]
+ * @param {string} [props.sectionsNote]
  * @param {'dark'|'light'} props.theme
  * @param {(s:number)=>string} props.formatTime
  */
-export function StemPlayer({ player, stemTypes, mode, bpm, theme, formatTime }) {
+export function StemPlayer({ player, stemTypes, mode, bpm, gridOffset, onGridOffsetChange, sections, onSectionsChange, sectionsDetecting, sectionsNote, theme, formatTime }) {
   const isDark = theme === 'dark';
   const { status, error, isPlaying, duration, muted, soloed, loop, waveforms, positionRef } = player;
 
-  const [gridOffset, setGridOffset] = useState(0); // seconds — where bar 1 lands
   const [hoverTime, setHoverTime] = useState(null);
   const [drag, setDrag] = useState(null); // { start, end } while dragging
   const [width, setWidth] = useState(0);
@@ -274,13 +282,15 @@ export function StemPlayer({ player, stemTypes, mode, bpm, theme, formatTime }) 
 
   const nudgeGrid = useCallback((beats) => {
     if (!beat) return;
-    setGridOffset(o => ((o + beats * beat) % bar + bar) % bar);
-  }, [beat, bar]);
+    onGridOffsetChange((((gridOffset + beats * beat) % bar) + bar) % bar);
+  }, [beat, bar, gridOffset, onGridOffsetChange]);
 
   const setBarOneHere = useCallback(() => {
     if (!bar) return;
-    setGridOffset(((positionRef.current % bar) + bar) % bar);
-  }, [bar, positionRef]);
+    onGridOffsetChange(((positionRef.current % bar) + bar) % bar);
+  }, [bar, positionRef, onGridOffsetChange]);
+
+  const seekAndPlay = useCallback((time) => { player.seek(time); if (!isPlaying) player.play(time); }, [player, isPlaying]);
 
   // Space toggles play while the map is focused
   const handleKeyDown = useCallback((e) => {
@@ -357,6 +367,25 @@ export function StemPlayer({ player, stemTypes, mode, bpm, theme, formatTime }) 
       )}
 
       {status === 'ready' && (
+        <div className={`py-1.5 border-b ${isDark ? 'border-[#1C2027]' : 'border-[#D9DDE3]'}`}>
+          <SectionStrip
+            sections={sections}
+            duration={duration}
+            barSec={bar}
+            gridOffset={gridOffset}
+            positionRef={positionRef}
+            onChange={onSectionsChange}
+            onSeek={seekAndPlay}
+            formatTime={formatTime}
+            theme={theme}
+            gutterWidth={LABEL_WIDTH}
+            detecting={sectionsDetecting}
+            note={sectionsNote}
+          />
+        </div>
+      )}
+
+      {status === 'ready' && (
         <div className="flex">
           {/* Lane labels + M/S */}
           <div className="shrink-0" style={{ width: LABEL_WIDTH, paddingTop: RULER_HEIGHT }}>
@@ -426,7 +455,7 @@ export function StemPlayer({ player, stemTypes, mode, bpm, theme, formatTime }) 
 
       {status === 'ready' && (
         <div className={`px-4 py-2 border-t font-mono text-[11px] ${isDark ? 'border-[#1C2027] text-[#7C8794]' : 'border-[#D9DDE3] text-[#6B7280]'}`}>
-          click to seek · drag to loop{bar ? ' (snaps to bars)' : ''} · M mute · S solo · space play/pause
+          click to seek · drag to loop{bar ? ' (snaps to bars)' : ''} · M mute · S solo · space play/pause · sections: click to jump, drag edges, click a label to rename
         </div>
       )}
     </section>

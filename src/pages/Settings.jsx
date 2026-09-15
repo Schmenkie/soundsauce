@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, Sun, Moon, Save, Lock, Unlock, HardDrive } from 'lucide-react';
+import { Settings as SettingsIcon, Sun, Moon, Palette, Lock, Unlock, HardDrive } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageTitle, useVault } from '../hooks';
@@ -7,22 +7,16 @@ import { LabSignIn } from '../components/auth';
 import { describeStorage, formatMB } from '../lib/vault';
 
 /**
- * Settings — theme, default artist name for stem filenames, storage, and the lab lock.
- * Everything here lives in localStorage (see AuthContext prefs); there is no account.
+ * Settings — theme, storage, and the lab lock. There is no account.
  */
 export function Settings({ theme, t, onThemeToggle }) {
   usePageTitle('Settings');
-  const { isSignedIn, signOut, prefs, updatePrefs } = useAuth();
+  const { isSignedIn, signOut } = useAuth();
   const [signInOpen, setSignInOpen] = useState(false);
   const vault = useVault();
   const storage = describeStorage(vault.storage);
 
   const isDark = theme === 'dark';
-  const inputClass = `w-full px-4 py-3 rounded-md border outline-none focus:ring-2 text-sm ${
-    isDark
-      ? 'bg-zinc-950 border-zinc-700 text-zinc-50 focus:ring-ember-500/40'
-      : 'bg-white border-stone-200 text-stone-900 focus:ring-ember-600/30'
-  }`;
   const card = `p-6 border space-y-6 rounded-lg ${isDark ? 'bg-zinc-900 border-zinc-700' : 'bg-white border-stone-200'}`;
 
   return (
@@ -37,8 +31,8 @@ export function Settings({ theme, t, onThemeToggle }) {
       {/* Preferences */}
       <div className="mb-8">
         <h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${t.text}`}>
-          <Save className="w-5 h-5" />
-          Preferences
+          <Palette className="w-5 h-5" />
+          Theme
         </h3>
 
         <div className={card}>
@@ -67,22 +61,6 @@ export function Settings({ theme, t, onThemeToggle }) {
                 Light
               </button>
             </div>
-          </div>
-
-          {/* Default artist name — used in stamped stem filenames when a track has no artist */}
-          <div>
-            <label htmlFor="artist-name" className={`block text-sm font-medium mb-1.5 ${t.textMuted}`}>Your artist name</label>
-            <p className={`text-xs mb-2 ${t.textDimmed}`}>
-              Written into Vital preset metadata and Remix Pack notes
-            </p>
-            <input
-              id="artist-name"
-              type="text"
-              value={prefs.artistName}
-              onChange={(e) => updatePrefs({ artistName: e.target.value })}
-              placeholder="e.g. Schmenk"
-              className={inputClass}
-            />
           </div>
         </div>
       </div>

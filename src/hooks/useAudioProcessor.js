@@ -1,14 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAudioWorker } from './useAudioWorker';
 
-// NOTE: FFT (fft, computeMagnitudeSpectrum) previously lived here but was removed
-// as a duplicate of the Web Worker implementation. All FFT-based analysis
-// (frequency bands, instrument detection) now runs in audio.worker.js.
-
 /**
- * Custom hook for audio processing, playback, and analysis.
- * Handles AudioContext lifecycle, playback controls, waveform generation,
- * spectrum visualization, and audio feature extraction.
+ * Custom hook for single-source audio playback and visualisation.
+ * Handles AudioContext lifecycle, playback controls, waveform generation and the
+ * spectrum analyser; tempo / key / section detection run in audio.worker.js.
  */
 export function useAudioProcessor() {
   // Web Worker for heavy DSP operations
@@ -564,17 +560,9 @@ export function useAudioProcessor() {
     durationRef.current = 0;
   }, [clearLoop]);
 
-  // NOTE: findAttackTime, analyzeFrequencyBands, analyzeEnvelope, and detectInstruments
-  // previously lived here but were removed as duplicates of the Web Worker implementation.
-  // All instrument detection and frequency analysis now runs in audio.worker.js.
-
-  // NOTE: BPM, key, ADSR, filter envelope, modulation, waveform detection, and spectral match
-  // are all handled by the Web Worker. See: src/workers/audio.worker.js
-
   /**
-   * Prepare audio buffer for playback and visualization without running detection.
+   * Prepare audio buffer for playback and visualization.
    * Decodes audio, generates waveform, caches buffer, sets duration.
-   * Call this on upload for instant waveform rendering.
    */
   const prepareAudioBuffer = useCallback(async (audioFileData) => {
     if (!audioFileData) {
@@ -621,121 +609,6 @@ export function useAudioProcessor() {
   }, [getAudioContext, generateWaveform, worker]);
 
   /**
-   * Detect instruments from audio file data (quick detection without full analysis).
-   * Uses Web Worker to keep UI responsive during detection.
-   * Used for automatic detection on upload.
-   */
-  const detectInstrumentsFromAudioData = useCallback(async (audioFileData) => {
-    if (!audioFileData) {
-      return { error: 'No audio data provided', instrumentDetection: null };
-    }
-
-    try {
-      const ctx = await getAudioContext();
-      const buffer = await ctx.decodeAudioData(audioFileData.slice(0));
-      const channelData = buffer.getChannelData(0);
-      const sampleRate = buffer.sampleRate;
-
-      // Generate waveform while we're at it (main thread - quick operation)
-      setWaveformData(generateWaveform(buffer));
-      setAudioBuffer(buffer);
-      setDuration(buffer.duration);
-      audioBufferRef.current = buffer;
-      durationRef.current = buffer.duration;
-
-      // Limit detection to first 10 seconds for quick response
-      const maxSamples = sampleRate * 10;
-      const detectionData = channelData.length > maxSamples
-        ? channelData.slice(0, maxSamples)
-        : channelData;
-
-      // Use Web Worker for instrument detection
-      const instrumentDetection = await worker.detectInstruments(detectionData, sampleRate);
-
-      return { error: null, instrumentDetection };
-    } catch {
-      return { error: 'Error analyzing audio file', instrumentDetection: null };
-    }
-  }, [getAudioContext, generateWaveform, worker]);
-
-  /**
-   * Analyze audio file data and extract features.
-   * Uses Web Worker for heavy DSP operations to keep UI responsive.
-   * Reuses cached AudioBuffer if available to avoid re-decoding.
-   *
-   * @param {ArrayBuffer} audioFileData - Raw audio file data
-   * @param {Object} [options] - Analysis options
-   * @param {number} [options.regionStart] - Start time in seconds for region-based analysis
-   * @param {number} [options.regionEnd] - End time in seconds for region-based analysis
-   */
-  const analyzeAudio = useCallback(async (audioFileData, options = {}) => {
-    if (!audioFileData && !audioBufferRef.current) {
-      return { error: 'Please upload or record audio first', features: null, instrumentDetection: null };
-    }
-
-    try {
-      let buffer;
-
-      // Reuse cached buffer ONLY if it was decoded from the same raw audio data.
-      // When analyzing a stem, audioFileData is the stem's ArrayBuffer (not the full mix),
-      // so audioBufferSourceRef won't match and we correctly decode the stem.
-      const isNewAudioSource = audioFileData && audioFileData !== audioBufferSourceRef.current;
-
-      if (audioBufferRef.current && !isNewAudioSource) {
-        buffer = audioBufferRef.current;
-      } else {
-        const ctx = await getAudioContext();
-        buffer = await ctx.decodeAudioData(audioFileData.slice(0));
-
-        // Only cache into the main refs if this is the first decode (no existing buffer).
-        // Stem buffers are ephemeral — waveform, playback, and spectrum depend on the
-        // full mix buffer in audioBufferRef, so we don't overwrite it for stems.
-        if (!audioBufferRef.current) {
-          setAudioBuffer(buffer);
-          setDuration(buffer.duration);
-          audioBufferRef.current = buffer;
-          audioBufferSourceRef.current = audioFileData;
-          durationRef.current = buffer.duration;
-        }
-      }
-
-      const channelData = buffer.getChannelData(0);
-      const sampleRate = buffer.sampleRate;
-
-      // Generate waveform if not already done (main thread - quick operation)
-      if (waveformData.length === 0) {
-        setWaveformData(generateWaveform(buffer));
-      }
-
-      let analysisData;
-
-      // If a region is specified (loop selection), analyze only that region
-      if (options.regionStart != null && options.regionEnd != null && options.regionEnd > options.regionStart) {
-        const startSample = Math.floor(options.regionStart * sampleRate);
-        const endSample = Math.min(Math.floor(options.regionEnd * sampleRate), channelData.length);
-        analysisData = channelData.slice(startSample, endSample);
-      } else {
-        // Default: limit analysis to first 30 seconds for performance
-        const maxSamples = sampleRate * 30;
-        analysisData = channelData.length > maxSamples
-          ? channelData.slice(0, maxSamples)
-          : channelData;
-      }
-
-      // Use Web Worker for heavy analysis operations
-      const [features, instrumentDetection, harmonics] = await Promise.all([
-        worker.analyzeAudio(analysisData, sampleRate),
-        worker.detectInstruments(analysisData, sampleRate),
-        worker.detectHarmonics(analysisData, sampleRate)
-      ]);
-
-      return { error: null, features, instrumentDetection, harmonics };
-    } catch {
-      return { error: 'Error analyzing audio file', features: null, instrumentDetection: null };
-    }
-  }, [getAudioContext, waveformData.length, generateWaveform, worker]);
-
-  /**
    * Format time in MM:SS format.
    */
   const formatTime = useCallback((seconds) => {
@@ -743,11 +616,6 @@ export function useAudioProcessor() {
     const secs = Math.floor(seconds % 60);
     return mins + ':' + secs.toString().padStart(2, '0');
   }, []);
-
-  // Worker-based spectral match (exposed for A/B comparison)
-  const calculateSpectralMatchAsync = useCallback(async (channelDataA, channelDataB, sampleRate) => {
-    return worker.calculateSpectralMatch(channelDataA, channelDataB, sampleRate);
-  }, [worker]);
 
   return {
     // State (throttled updates for React rendering)
@@ -762,10 +630,6 @@ export function useAudioProcessor() {
     loopEnabled,
     loopStart,
     loopEnd,
-
-    // Worker state
-    isAnalyzing: worker.isProcessing,
-    analysisProgress: worker.progress,
 
     // Real-time refs (for smooth 60fps animations without re-renders)
     spectrumDataRef,
@@ -786,21 +650,15 @@ export function useAudioProcessor() {
     seek,
     clearLoop,
     reset,
-    analyzeAudio,
     prepareAudioBuffer,
-    detectInstrumentsFromAudioData,
     cleanup,
-
-    // Sound Design Analysis (worker-based async version)
-    calculateSpectralMatchAsync,
 
     // Utilities
     formatTime,
     generateWaveform,
     generateWaveformData: worker.generateWaveformData,
     generateWaveformColors: worker.generateWaveformColors,
-    extractWavetable: worker.extractWavetable,
     detectTempoAndKey: worker.detectTempoAndKey,
-    analyzeStemAnatomy: worker.analyzeStemAnatomy
+    detectSections: worker.detectSections,
   };
 }

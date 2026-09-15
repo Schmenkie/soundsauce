@@ -38,15 +38,16 @@ export function saveBlob(blob, filename) {
  * @param {Record<string, { buffer: ArrayBuffer, ext: string }>} stems - keyed by stem type
  * @param {object} meta - { artist, title, bpm, key, ... } (see buildPackNotes)
  * @param {string} mode - separation mode id
+ * @param {{ sections?: object[], gridOffset?: number }} [extras] - section labels for notes.txt
  * @returns {Blob}
  */
-export function buildRemixPackBlob(stems, meta, mode) {
+export function buildRemixPackBlob(stems, meta, mode, extras) {
   const stemTypes = Object.keys(stems);
   const entries = {};
   for (const stemType of stemTypes) {
     entries[buildStemFilename(meta, stemType, mode, stems[stemType].ext)] = new Uint8Array(stems[stemType].buffer);
   }
-  entries['notes.txt'] = strToU8(buildPackNotes(meta, stemTypes, mode));
+  entries['notes.txt'] = strToU8(buildPackNotes(meta, stemTypes, mode, extras));
   return new Blob([zipSync(entries, { level: 0 })], { type: 'application/zip' });
 }
 
@@ -55,7 +56,7 @@ export function buildRemixPackBlob(stems, meta, mode) {
  * @param {Record<string, string>} stemUrls - keyed by stem type
  * @param {(loadedCount:number, total:number) => void} [onProgress]
  */
-export async function downloadRemixPackFromUrls(stemUrls, meta, mode, onProgress) {
+export async function downloadRemixPackFromUrls(stemUrls, meta, mode, onProgress, extras) {
   const types = Object.keys(stemUrls).filter(k => stemUrls[k]);
   const stems = {};
   let done = 0;
@@ -70,21 +71,22 @@ export async function downloadRemixPackFromUrls(stemUrls, meta, mode, onProgress
     done++;
     onProgress?.(done, types.length);
   }
-  saveBlob(buildRemixPackBlob(stems, meta, mode), buildPackFilename(meta));
+  saveBlob(buildRemixPackBlob(stems, meta, mode, extras), buildPackFilename(meta));
 }
 
 /**
  * Send the stems to the local helper, which writes them into ~/Music/Remix Lab/Stems/
  * <Artist - Title>/ with stamped names + notes.txt — i.e. straight into Live's browser.
  * @param {Record<string, string>} stemUrls - keyed by stem type (Blob or Replicate URLs)
+ * @param {{ sections?: object[], gridOffset?: number }} [extras] - section labels for notes.txt
  * @returns {Promise<{ dir: string, files: string[] }>}
  */
-export function saveStemsToLive(stemUrls, meta, mode) {
+export function saveStemsToLive(stemUrls, meta, mode, extras) {
   const types = Object.keys(stemUrls).filter(k => stemUrls[k]);
   return helperSaveStems({
     folder: buildPackFolderName(meta),
     files: types.map(type => ({ name: buildStemFilename(meta, type, mode, extFromUrl(stemUrls[type])), url: stemUrls[type] })),
-    notes: buildPackNotes(meta, types, mode),
+    notes: buildPackNotes(meta, types, mode, extras),
   });
 }
 

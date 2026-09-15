@@ -6,6 +6,8 @@
  *   "Daft Punk - One More Time - 123bpm - F#m - vocals.flac"
  */
 
+import { barAtTime } from './sections';
+
 /** Separation modes exposed in the UI, in display order. */
 export const SEPARATION_MODES = [
   {
@@ -122,7 +124,14 @@ export function buildPackFilename(meta) {
  * Contents of notes.txt inside a Remix Pack — everything you need when you drop
  * the stems into a project.
  */
-export function buildPackNotes(meta, stemTypes, mode) {
+/**
+ * @param {object} meta   { artist, title, bpm, key, … }
+ * @param {string[]} stemTypes
+ * @param {string} mode
+ * @param {{ sections?: { label: string, start: number }[], gridOffset?: number }} [extras]
+ *   section labels (intro / breakdown / buildup / drop / outro) with bar numbers
+ */
+export function buildPackNotes(meta, stemTypes, mode, extras = {}) {
   const lines = [];
   const artist = meta?.artist && !/^unknown artist$/i.test(meta.artist) ? meta.artist : null;
   lines.push(`${artist ? `${artist} - ` : ''}${meta?.title || 'Untitled'}`);
@@ -146,6 +155,17 @@ export function buildPackNotes(meta, stemTypes, mode) {
       for (const ck of meta.key.compatibleKeys) {
         lines.push(`    ${ck.code}${ck.relation ? ` — ${ck.relation}` : ''}`);
       }
+    }
+  }
+  if (Array.isArray(extras.sections) && extras.sections.length) {
+    const barSec = meta?.bpm ? 240 / meta.bpm : 0;
+    const off = extras.gridOffset || 0;
+    lines.push('');
+    lines.push('Sections:');
+    for (const sec of extras.sections) {
+      const m = Math.floor(sec.start / 60), s = Math.floor(sec.start % 60);
+      const bar = barSec ? `  bar ${barAtTime(sec.start, barSec, off)}` : '';
+      lines.push(`  ${sec.label.padEnd(10)} ${m}:${String(s).padStart(2, '0')}${bar}`);
     }
   }
   lines.push('');

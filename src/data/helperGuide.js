@@ -20,11 +20,11 @@ export const COSTS = {
 };
 
 export const COST_SUMMARY = [
-  { cost: 'gpu', text: 'Only "Grab Vocals" / "Separate" (and batch grab, once per track). Nothing else spends money.' },
-  { cost: 'blob', text: 'The source upload before separation, auto-keep in Vocals mode, Keep / Keep all, and batch grab. A 3-minute track ≈ 55 MB, a 6-minute one ≈ 200 MB. Delete a track in the Vault to free it.' },
-  { cost: 'disk', text: 'Paste-a-link (Sources folder), To Live (Stems folder), vocal chops (chops subfolder). Delete them in Finder whenever.' },
-  { cost: 'download', text: 'Remix Pack, per-stem download arrows, chop zip, "save file". Nothing is stored anywhere else.' },
-  { cost: 'free', text: 'Everything else: playing, the Stem Player, Anatomy, chop detection, the calculator, notes, tags.' },
+  { cost: 'gpu', text: 'Only "Grab Vocals" / "Separate". Nothing else spends money.' },
+  { cost: 'blob', text: 'The source upload before separation, auto-keep in Vocals mode, Keep / Keep all. A 3-minute track ≈ 55 MB, a 6-minute one ≈ 200 MB. Delete a track in the Vault to free it.' },
+  { cost: 'disk', text: 'Paste-a-link (Sources folder) and To Live (Stems folder). Delete them in Finder whenever.' },
+  { cost: 'download', text: 'Remix Pack, per-stem download arrows, "save file". Nothing is stored anywhere else.' },
+  { cost: 'free', text: 'Everything else: playing, the Stem Player, sections, the calculator.' },
 ];
 
 export const GUIDE = {
@@ -32,9 +32,8 @@ export const GUIDE = {
     tips: [
       { title: 'Paste a link', tip: 'Cmd+V a YouTube or SoundCloud link anywhere on this page. The helper on your Mac turns it into a FLAC and loads it here.' },
       { title: 'Grab Vocals', tip: 'Vocals + Instrumental is the remix default — two lossless FLACs stamped with BPM and key, kept automatically.' },
-      { title: 'Understand it', tip: 'After separation: Stem Player to solo and loop bars, Anatomy for structure and chords, Vocal Chops for phrases.' },
-      { title: 'Region analysis', tip: 'Drag on the waveform to highlight a section. Analyzing a short, isolated region gives much more accurate results.' },
-      { title: 'Keys', tip: 'Space play/pause, L loop, Esc clear selection, arrows skip. In the Stem Player, space works when the map is focused.' },
+      { title: 'Sections', tip: 'Intro / breakdown / buildup / drop / outro are guessed from the energy as soon as the track loads and refined once the stems land. Drag the edges or click a label if it got one wrong.' },
+      { title: 'Keys', tip: 'Space play/pause, arrows skip 5 s, Esc clears the loop — for whichever timeline is on screen.' },
     ],
     sections: [
       {
@@ -42,21 +41,20 @@ export const GUIDE = {
         items: [
           { name: 'Paste a link / Get file', cost: 'disk', what: 'YouTube or SoundCloud URL → the helper downloads it as FLAC, loads it here and saves a copy to ~/Music/Remix Lab/Sources/. Needs the menubar dot green.' },
           { name: 'Search (type a name)', cost: 'free', what: 'Free text searches YouTube and SoundCloud at once; click a result to get it.' },
-          { name: 'Playlist / set link', cost: 'free', what: 'Lists the tracks with checkboxes. Nothing happens until you press "Grab vocals from N".' },
-          { name: 'Grab vocals from N', cost: 'gpu', what: 'Queue: download → read tempo & key → separate vocals → keep, one track after another. Each track also uses Blob (source + two stems). Stop cancels the rest.' },
+          { name: 'Playlist / set link', cost: 'free', what: 'Lists the tracks in the set — click the one you want.' },
           { name: 'DRM notice', cost: 'free', what: 'Major-label SoundCloud uploads are protected streams. The Lab searches by name instead — pick the YouTube result.' },
           { name: 'Upload Audio / drop a file', cost: 'free', what: 'WAV, MP3, M4A or FLAC from your Mac. Nothing is uploaded until you separate.' },
           { name: 'save file (header)', cost: 'download', what: 'Saves the imported FLAC from memory to Downloads. The Sources folder already has a copy.' },
         ],
       },
       {
-        title: 'Waveform',
+        title: 'Before the stems: the full mix',
         items: [
-          { name: 'Colours', cost: 'free', what: 'Colour is frequency: violet = sub, blue = low-mids, green = mids, yellow = high-mids, red = air. The played part is in full colour; a filtered breakdown reads blue, an open drop yellow.' },
-          { name: 'Drag on the waveform', cost: 'free', what: 'Selects a region for analysis and looping. Esc clears it.' },
-          { name: 'Zoom −/+', cost: 'free', what: 'Up to 64× on the waveform; the overview strip below shows where you are.' },
-          { name: 'BPM / key chips', cost: 'free', what: 'Quick detection on decode. A "~" before the key means low confidence — hover for the runner-up keys.' },
-          { name: 'Deeper analysis (bottom of the page)', cost: 'free', what: 'The older sound-design analyzer: envelope, timbre, instrument guess and a Vital recipe for the selection (or the first 30 s). Uses Gemini once for instrument labels — negligible. Secondary to the stems tools.' },
+          { name: 'BPM / key chips', cost: 'free', what: 'Detected on decode. A "~" before the key means low confidence — hover for the runner-up keys. Filenames and the bar grid use these.' },
+          { name: 'Sections strip', cost: 'free', what: 'A first guess from the full mix: bass + mids in = drop, mids gone = intro / outro / breakdown, energy climbing into a drop = buildup. Click a block to jump there.' },
+          { name: 'Waveform colours', cost: 'free', what: 'Colour is frequency: violet = sub, blue = low-mids, green = mids, yellow = high-mids, red = air. The played part is in full colour.' },
+          { name: 'Drag on the waveform', cost: 'free', what: 'Makes a loop. Esc clears it. Zoom −/+ goes to 64×.' },
+          { name: 'Play / transport', cost: 'free', what: 'Plays the full mix. It disappears once the stems are ready — the Stem Player takes over.' },
         ],
       },
       {
@@ -72,49 +70,32 @@ export const GUIDE = {
         title: 'Stems ready — the buttons',
         items: [
           { name: 'Keep all', cost: 'blob', what: 'Re-hosts every temporary stem on Blob so it survives Replicate\'s 7-day expiry. Only shows when something is still temporary.' },
-          { name: 'To Live', cost: 'disk', what: 'Writes the stems + notes.txt into ~/Music/Remix Lab/Stems/<Artist - Title>/ so they show in Live\'s browser. Nothing goes to Blob.' },
-          { name: 'Remix Pack', cost: 'download', what: 'Zip of every stem plus notes.txt (tempo, key, Camelot neighbours, warp tips) to Downloads.' },
-          { name: 'Full Track', cost: 'free', what: 'Not a download. Switches the Analyze / Play target back from a stem to the whole mix.' },
-          { name: 'Stem card: analyze', cost: 'free', what: 'Shows this stem in the waveform and runs the deeper analysis on it.' },
-          { name: 'Stem card: play', cost: 'free', what: 'Plays just this stem through the main player.' },
-          { name: 'Stem card: ↓', cost: 'download', what: 'Saves this one stem as a stamped FLAC.' },
+          { name: 'To Live', cost: 'disk', what: 'Writes the stems + notes.txt (tempo, key, sections with bar numbers) into ~/Music/Remix Lab/Stems/<Artist - Title>/ so they show in Live\'s browser. Nothing goes to Blob.' },
+          { name: 'Remix Pack', cost: 'download', what: 'Zip of every stem plus the same notes.txt, to Downloads.' },
+          { name: 'Stem row: ↓', cost: 'download', what: 'Saves this one stem as a stamped FLAC.' },
           { name: 'kept / keep', cost: 'blob', what: '"KEPT" = permanent on Blob. "keep" = still on Replicate; click to re-host it (~25 MB per stem).' },
           { name: '↺ (reset)', cost: 'free', what: 'Clears the stems so you can separate again with another mode. The vault entry stays.' },
         ],
       },
       {
-        title: 'Stem Player',
+        title: 'Stem Player + sections',
         items: [
-          { name: 'Play', cost: 'free', what: 'All stems in sync. Pauses the main player.' },
+          { name: 'Play', cost: 'free', what: 'All stems in sync, one timeline.' },
           { name: 'M / S', cost: 'free', what: 'Mute / solo a lane. Solo wins. "clear mix" resets.' },
           { name: 'Click / drag on the map', cost: 'free', what: 'Click seeks. Drag makes a loop snapped to bars; the chip shows its length, × clears it.' },
-          { name: 'bar 1 here / ◀ ▶', cost: 'free', what: 'Pins bar 1 to the playhead, nudges the grid a beat. Use it when the track has a pickup or the grid looks offset.' },
-        ],
-      },
-      {
-        title: 'Anatomy',
-        items: [
-          { name: 'Structure grid', cost: 'free', what: 'One cell per bar per stem; brighter = louder, grey = silent. Lines mark where the set of playing stems changes or a stem jumps 6 dB.' },
-          { name: 'Section list', cost: 'free', what: '"vocals in", "instrumental down 8 dB — breakdown?" — read as hints, then check by ear with the Stem Player.' },
-          { name: 'Chords — 4-bar loop', cost: 'free', what: 'The most common four-bar chord sequence in the instrumental, from triad templates. Solid for one- or two-chord house, rough on busy harmony.' },
-          { name: 'Bass roots', cost: 'free', what: 'Only shown with a real bass stem (4-stem mode) — in two-stem mode the kick would fake it.' },
-          { name: 'Stem cards', cost: 'free', what: 'Band balance (which of the five colours a stem lives in), how many bars it plays, level, drum hits per bar.' },
-        ],
-      },
-      {
-        title: 'Vocal Chops',
-        items: [
-          { name: 'tight / normal / loose', cost: 'free', what: 'How big a silence counts as a phrase boundary (120 / 250 / 500 ms). Tight = every breath, loose = whole lines.' },
-          { name: '▶ / time', cost: 'free', what: '▶ previews the chop on its own; clicking the time jumps the Stem Player there.' },
-          { name: 'zip', cost: 'download', what: 'All chops as 16-bit WAVs with stamped names, to Downloads.' },
-          { name: 'to live', cost: 'disk', what: 'Writes the chops into ~/Music/Remix Lab/Stems/<track>/chops/.' },
+          { name: 'bar 1 here / ◀ ▶', cost: 'free', what: 'Pins bar 1 to the playhead, nudges the grid a beat. Sections re-detect on the new grid (unless you have edited them).' },
+          { name: 'Sections: click a block', cost: 'free', what: 'Jumps there and plays. The label shows the start time and bar number.' },
+          { name: 'Sections: drag an edge', cost: 'free', what: 'Moves the boundary, snapped to bars.' },
+          { name: 'Sections: click a label', cost: 'free', what: 'Rename it (intro / breakdown / buildup / drop / outro) or remove it.' },
+          { name: 'Sections: +', cost: 'free', what: 'Adds a section at the playhead. Edits are saved with the track in the Vault and go into notes.txt.' },
+          { name: '"from the mix" / "from stems" / "edited"', cost: 'free', what: 'Where the current sections came from. Once edited, detection never overwrites them.' },
         ],
       },
     ],
   },
   '/vault': {
     tips: [
-      { title: 'Your crate', tip: 'Every separated track with its stems, tempo and key. Kept stems never expire.' },
+      { title: 'Your crate', tip: 'Every separated track with its stems, tempo, key and sections. Kept stems never expire.' },
       { title: 'Mixes with', tip: 'The link icon shows everything in a compatible key (Camelot neighbours) and tempo (±8% or half/double).' },
       { title: 'Space', tip: 'The bar at the top is the 1 GB Blob budget. Deleting a track frees its stems and source.' },
     ],
@@ -122,12 +103,10 @@ export const GUIDE = {
       {
         title: 'Card buttons',
         items: [
-          { name: 'Open in Lab', cost: 'free', what: 'Restores the track and its stems into the Lab (downloads them from Blob into memory, nothing new is stored).' },
+          { name: 'Open in Lab', cost: 'free', what: 'Restores the track, its stems and its sections into the Lab (downloads them from Blob into memory, nothing new is stored).' },
           { name: 'pack', cost: 'download', what: 'Remix Pack zip to Downloads.' },
           { name: 'to live', cost: 'disk', what: 'Stems + notes.txt into ~/Music/Remix Lab/Stems/<Artist - Title>/.' },
-          { name: 'layers (4-stem)', cost: 'gpu', what: 'Re-separates this track as vocals / drums / bass / other. Reuses the source already on Blob (no second upload); the new stems replace the old ones in this entry and are NOT auto-kept.' },
           { name: 'calculator', cost: 'free', what: 'Opens /calc with this track as the vocal source.' },
-          { name: 'notes', cost: 'free', what: 'Opens the Remix Notes entry for this track.' },
           { name: 'link (mixes with)', cost: 'free', what: 'Filters the vault to compatible keys and tempos.' },
           { name: 'arrow (original)', cost: 'free', what: 'Opens the YouTube / SoundCloud page the track came from.' },
           { name: 'trash', cost: 'free', what: 'Removes the entry and deletes its stems and source from Blob — this is how you get space back. Files already in ~/Music/Remix Lab are untouched.' },
@@ -139,7 +118,6 @@ export const GUIDE = {
         title: 'Editing',
         items: [
           { name: 'Pencil (hover the card)', cost: 'free', what: 'Inline edit of title and artist (Enter saves, Esc cancels). Filenames use these.' },
-          { name: 'tag icon', cost: 'free', what: 'Add #tags to a track; the chips above the grid filter by tag. × on a tag removes it.' },
           { name: 'Size on the card', cost: 'free', what: 'How many MB this track\'s stems take on Blob.' },
         ],
       },
@@ -163,25 +141,8 @@ export const GUIDE = {
       },
     ],
   },
-  '/notes': {
-    tips: [
-      { title: 'Write it up', tip: 'One entry per remix: what you pulled, what you changed, what you learned, and a link to the result.' },
-      { title: 'Public', tip: 'Tick "show on the public notes page" and the entry appears for visitors — title, key, tempo and your notes only, never the audio.' },
-    ],
-    sections: [
-      {
-        title: 'The editor',
-        items: [
-          { name: 'write / edit / close', cost: 'free', what: 'Opens the three fields and the result link for that track. Save writes them onto the vault entry.' },
-          { name: 'show on the public notes page', cost: 'free', what: 'Publishes this entry to /notes for anyone (read-only, no audio).' },
-          { name: 'Lab / Calculator icons', cost: 'free', what: 'Jump to the track in the Lab or the calculator.' },
-        ],
-      },
-    ],
-  },
   '/settings': {
     tips: [
-      { title: 'Set your DAW', tip: 'Recipes recommend plugins native to your DAW.' },
       { title: 'Lock the lab', tip: 'Separation and uploads cost money, so they sit behind the lab password.' },
     ],
     sections: [

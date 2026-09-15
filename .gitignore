@@ -34,3 +34,7 @@ scripts/audioset_labels.json
 .claude/settings.local.json
 __pycache__/
 public/__test/
+
+# Playwright
+test-results/
+playwright-report/

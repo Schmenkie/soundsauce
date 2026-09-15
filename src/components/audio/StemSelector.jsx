@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import {
-  Play, Pause, Download, Loader2, Scissors, X, Check, Mic, Disc, Activity, Piano,
-  Music, Sparkles, Guitar, Layers, Cloud, CloudOff, Package, RotateCcw, FolderInput
+  Download, Loader2, Scissors, X, Check, Mic, Disc, Activity, Piano,
+  Guitar, Layers, Cloud, CloudOff, Package, RotateCcw, FolderInput
 } from 'lucide-react';
 import { SEPARATION_MODES, getStemLabel } from '../../utils/stemFiles';
 import { stemColor } from '../../utils/spectrum';
-import { MiniSpectrum } from '../ui/MiniSpectrum';
 
 /**
  * Icons per stem key. Labels come from getStemLabel() so `other` reads as
@@ -88,28 +87,10 @@ function KeepBadge({ state, onKeep, label, theme, inverted }) {
 }
 
 /**
- * Individual stem card with play/select functionality
+ * One row per stem: colour stripe, label, format / size, keep state, download.
+ * Playback lives in the Stem Player below.
  */
-function StemCard({
-  stemType,
-  mode,
-  isAvailable,
-  isSelected,
-  isDownloaded,
-  isPlaying,
-  isAnalyzing,
-  isAnalyzed,
-  keepState,
-  onSelect,
-  onPlay,
-  onDownload,
-  onAnalyze,
-  onKeep,
-  spectrumDataRef,
-  sizeBytes,
-  theme,
-  t
-}) {
+function StemCard({ stemType, mode, isAvailable, isDownloaded, keepState, onDownload, onKeep, sizeBytes, theme, t }) {
   const IconComponent = STEM_ICONS[stemType] || Layers;
   const label = getStemLabel(stemType, mode);
   const color = stemColor(stemType);
@@ -117,28 +98,9 @@ function StemCard({
 
   return (
     <div
-      role="button"
-      tabIndex={isAvailable ? 0 : -1}
-      onClick={() => {
-        if (isAvailable) {
-          onSelect(stemType);
-        }
-      }}
-      onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && isAvailable) {
-          e.preventDefault();
-          onSelect(stemType);
-        }
-      }}
-      aria-label={`Select ${label} stem`}
-      className={`relative pl-5 pr-4 py-4 rounded-lg border transition-all cursor-pointer ${
-        isSelected
-          ? isDark ? 'bg-[#14171C] border-[#2A3039]' : 'bg-white border-[#B8BEC7]'
-          : isAvailable
-            ? isDark ? 'bg-[#0D0F12] border-[#1C2027] hover:border-[#2A3039]' : 'bg-white border-[#D9DDE3] hover:border-[#B8BEC7]'
-            : isDark ? 'bg-[#0D0F12] border-[#1C2027] opacity-50 cursor-not-allowed' : 'bg-white border-[#D9DDE3] opacity-50 cursor-not-allowed'
-      }`}
-      style={isSelected ? { boxShadow: `inset 0 0 0 1px ${color.hex}55, 0 0 24px ${color.hex}22` } : undefined}
+      className={`relative flex items-center gap-3 pl-5 pr-3 py-3 rounded-lg border ${
+        isDark ? 'bg-[#0D0F12] border-[#1C2027]' : 'bg-white border-[#D9DDE3]'
+      } ${isAvailable ? '' : 'opacity-50'}`}
     >
       {/* Channel colour stripe — this stem's home in the spectrum */}
       <div
@@ -146,99 +108,27 @@ function StemCard({
         style={{ background: color.gradient || color.hex }}
         aria-hidden="true"
       />
-
-      {/* Analyzed checkmark indicator */}
-      {isAnalyzed && (
-        <div className="absolute top-2 right-2">
-          <div className={`w-5 h-5 flex items-center justify-center rounded-full ${isDark ? 'bg-[#14171C]' : 'bg-[#EDEFF3]'}`}>
-            <Check className="w-3 h-3" style={{ color: color.hex }} />
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <IconComponent className="w-4 h-4" style={{ color: color.hex }} />
-            <div className={`font-display font-bold uppercase tracking-wide text-[13px] ${t.text}`}>
-              {label}
-            </div>
-          </div>
-          {/* Readout */}
-          <div className={`mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px] ${t.textDimmed}`}>
-            <span>format</span><span className={t.textMuted}>flac{sizeBytes ? ` · ${(sizeBytes / 1048576).toFixed(1)} MB` : ''}</span>
-            <span>state</span>
-            <span className={t.textMuted}>
-              {isAnalyzed ? 'analyzed' : isPlaying ? 'playing' : isDownloaded ? 'ready' : 'remote'}
-              {isAvailable && (
-                <span className="ml-2 inline-flex">
-                  <KeepBadge state={keepState} onKeep={() => onKeep(stemType)} label={label} theme={theme} inverted={false} />
-                </span>
-              )}
+      <IconComponent className="w-4 h-4 flex-shrink-0" style={{ color: color.hex }} />
+      <div className="flex-1 min-w-0">
+        <div className={`font-display font-bold uppercase tracking-wide text-[13px] truncate ${t.text}`}>{label}</div>
+        <div className={`font-mono text-[11px] ${t.textDimmed}`}>
+          flac{sizeBytes ? ` · ${(sizeBytes / 1048576).toFixed(1)} MB` : isDownloaded ? '' : ' · remote'}
+          {isAvailable && (
+            <span className="ml-2 inline-flex">
+              <KeepBadge state={keepState} onKeep={() => onKeep(stemType)} label={label} theme={theme} inverted={false} />
             </span>
-          </div>
-        </div>
-        {/* Live five-band meter — moves while this stem plays */}
-        <MiniSpectrum spectrumDataRef={spectrumDataRef} active={!!isPlaying} height={52} className="w-14 flex-shrink-0" />
-      </div>
-
-      {/* Action buttons */}
-      {isAvailable && (
-        <div className="space-y-2">
-          {/* Primary: Analyze button */}
-          {onAnalyze && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onAnalyze(stemType);
-              }}
-              disabled={isAnalyzing}
-              className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-mono rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                isDark ? 'bg-[#14171C] border-[#1C2027] text-[#E8ECF1] hover:border-[#2A3039]' : 'bg-[#F5F6F8] border-[#D9DDE3] text-[#0F1216] hover:border-[#B8BEC7]'
-              }`}
-              aria-label={`Analyze ${label} stem`}
-            >
-              {isAnalyzing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
-              <span>{isAnalyzing ? 'analyzing…' : 'analyze'}</span>
-            </button>
           )}
-
-          {/* Secondary: Play + Download */}
-          <div className="flex gap-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPlay(stemType);
-              }}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-mono rounded-md transition-colors ${t.button}`}
-              style={isPlaying ? { borderColor: color.hex, color: color.hex } : undefined}
-              aria-label={`Play ${label} stem`}
-            >
-              {isPlaying ? (
-                <Pause className="w-4 h-4" />
-              ) : (
-                <Play className="w-4 h-4" />
-              )}
-              <span className="hidden sm:inline">{isPlaying ? 'pause' : 'play'}</span>
-            </button>
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDownload(stemType);
-              }}
-              className={`px-3 py-2 rounded-md transition-colors ${t.button}`}
-              aria-label={`Download ${label} stem`}
-              title="Download FLAC (stamped with BPM + key)"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-          </div>
         </div>
+      </div>
+      {isAvailable && (
+        <button
+          onClick={() => onDownload(stemType)}
+          className={`px-2.5 py-2 rounded-md transition-colors ${t.button}`}
+          aria-label={`Download ${label} stem`}
+          title="Download FLAC (stamped with BPM + key)"
+        >
+          <Download className="w-4 h-4" />
+        </button>
       )}
     </div>
   );
@@ -297,21 +187,8 @@ export function StemSelector({
   separationError,
   keepStatus, // { [stemType]: 'saving' | 'saved' | 'error' }
 
-  // Selection state
-  selectedStem, // 'full' | stem key
-  onSelectStem,
-
-  // Playback state
-  playingStem, // Currently playing stem type or null
-
-  // Analysis state
-  onAnalyzeStem, // callback(stemType) — triggers analysis on a stem
-  analyzingStem, // Currently analyzing stem type or null
-  analyzedStem, // Most recently analyzed stem type or null
-
   // Actions
   onSeparate, // callback({ mode, quality })
-  onPlayStem,
   onDownloadStem, // callback(stemType) — stamped single-file download
   onDownloadPack, // callback() — zip of all stems + notes.txt
   onSaveToLive, // callback() — helper writes stems into ~/Music/Remix Lab/Stems/ (null when helper offline)
@@ -319,9 +196,6 @@ export function StemSelector({
   onKeepAll,
   onCancel,
   onReset, // start a new separation with a different mode
-
-  // Live audio (for per-stem meters)
-  spectrumDataRef,
 
   // UI props
   hasAudio, // Whether source audio is loaded
@@ -473,12 +347,10 @@ export function StemSelector({
     );
   }
 
-  // After separation - show stem cards
+  // After separation - show stem rows
   const gridCols = availableTypes.length <= 2
     ? 'grid-cols-1 sm:grid-cols-2'
-    : availableTypes.length <= 4
-      ? 'grid-cols-2 lg:grid-cols-4'
-      : 'grid-cols-2 lg:grid-cols-3';
+    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
 
   return (
     <div className={`p-4 ${t.card}`}>
@@ -520,7 +392,7 @@ export function StemSelector({
             <h4 className={`font-display font-bold uppercase tracking-wide text-sm ${t.text}`}>{isExpired ? 'Stems Expired' : `${modeInfo.label} Ready`}</h4>
             <p className={`text-sm ${t.textMuted}`}>
               {isExpired
-                ? 'Analysis results are still available'
+                ? 'Separate again to get them back'
                 : allKept
                   ? 'Saved permanently — download any time'
                   : anySaving
@@ -571,19 +443,6 @@ export function StemSelector({
             </button>
           )}
 
-          {/* Full track option */}
-          <button
-            onClick={() => onSelectStem('full')}
-            className={`px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 rounded-md ${
-              selectedStem === 'full'
-                ? theme === 'dark' ? 'bg-[#14171C] text-[#E8ECF1] border border-ember-500 ring-signal' : 'bg-white text-[#0F1216] border border-ember-600 ring-signal'
-                : t.button
-            }`}
-          >
-            <Music className="w-4 h-4" />
-            <span className="hidden sm:inline">Full Track</span>
-          </button>
-
           {onReset && !isExpired && (
             <button
               onClick={onReset}
@@ -605,18 +464,10 @@ export function StemSelector({
             stemType={stemType}
             mode={resultMode}
             isAvailable={!!(stems && stems[stemType])}
-            isSelected={selectedStem === stemType}
             isDownloaded={!!stemAudioData[stemType]}
-            isPlaying={playingStem === stemType}
-            isAnalyzing={analyzingStem === stemType}
-            isAnalyzed={analyzedStem === stemType}
             keepState={keepStates[stemType]}
-            spectrumDataRef={spectrumDataRef}
             sizeBytes={stemAudioData[stemType]?.byteLength}
-            onSelect={onSelectStem}
-            onPlay={onPlayStem}
             onDownload={onDownloadStem}
-            onAnalyze={onAnalyzeStem}
             onKeep={onKeepStem}
             theme={theme}
             t={t}

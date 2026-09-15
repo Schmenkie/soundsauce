@@ -17,18 +17,16 @@ test.describe('Remix Lab smoke tests', () => {
     await expect(page).toHaveTitle(/Settings/);
   });
 
-  test('vault, calculator and notes pages load', async ({ page }) => {
+  test('vault and calculator pages load', async ({ page }) => {
     await page.goto('/vault');
     await expect(page).toHaveTitle(/Vault/);
     await page.goto('/calc');
     await expect(page).toHaveTitle(/Calculator/);
-    await page.goto('/notes');
-    await expect(page).toHaveTitle(/Notes/);
   });
 
   test('helper guide opens from the floating icon', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Show tips' }).click();
+    await page.getByRole('button', { name: 'Show tips' }).click({ force: true }); // the icon idles on an infinite animation
     await page.getByRole('tab', { name: 'What does this do?' }).click();
     await expect(page.getByRole('button', { name: /Stems ready/ })).toBeVisible();
   });

@@ -2,33 +2,15 @@ import { createContext, useContext, useState, useEffect, useCallback, useMemo } 
 import { getLabToken, labSignIn, labSignOut, labVerify } from '../lib/labAuth';
 
 /**
- * Lab auth + local preferences.
- *
- * Replaces the old Supabase-backed AuthProvider. There is exactly one user, so
- * "auth" is a password gate for the paid API routes, and "profile" collapses to a
- * few preferences kept in localStorage (DAW, artist name for stem filenames).
+ * Lab auth. There is exactly one user, so "auth" is a password gate for the paid API
+ * routes (Replicate GPU, Blob uploads) — see api/_auth.js.
  */
-
-const PREFS_KEY = 'soundsauce_prefs';
-const DEFAULT_PREFS = {
-  dawPreference: 'Ableton Live',
-  artistName: '',
-};
-
-function readPrefs() {
-  try {
-    return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')) };
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
-}
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [isSignedIn, setIsSignedIn] = useState(() => !!getLabToken());
   const [loading, setLoading] = useState(true);
-  const [prefs, setPrefs] = useState(readPrefs);
 
   // Validate the stored token once on mount (drops sessions the server no longer accepts)
   useEffect(() => {
@@ -53,22 +35,12 @@ export function AuthProvider({ children }) {
     setIsSignedIn(false);
   }, []);
 
-  const updatePrefs = useCallback((patch) => {
-    setPrefs(prev => {
-      const next = { ...prev, ...patch };
-      try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
-
   const value = useMemo(() => ({
     isSignedIn,
     loading,
     signIn,
     signOut,
-    prefs,
-    updatePrefs,
-  }), [isSignedIn, loading, signIn, signOut, prefs, updatePrefs]);
+  }), [isSignedIn, loading, signIn, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

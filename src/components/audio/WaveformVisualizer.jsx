@@ -3,7 +3,7 @@ import { spectrumColor, spectrumRgb } from '../../utils/spectrum';
 
 /** How much spectrum colour shows through on the unplayed waveform (0 = plain grey) */
 const UNPLAYED_SPECTRUM_MIX = 0.35;
-import { ZoomIn, ZoomOut, Repeat, X, RotateCcw, Scissors } from 'lucide-react';
+import { ZoomIn, ZoomOut, Repeat, X, RotateCcw } from 'lucide-react';
 
 // Zoom snap levels for button controls
 const ZOOM_SNAPS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
@@ -58,8 +58,6 @@ export function WaveformVisualizer({
   const dimsRef = useRef({ width: 0, height: 0, dpr: 1 });
 
   // Track first interaction for contextual hint
-  const hasInteractedRef = useRef(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
 
   // Cursor state for loop handle hover
   const [cursorStyle, setCursorStyle] = useState('crosshair');
@@ -642,10 +640,6 @@ export function WaveformVisualizer({
 
   const handlePointerDown = useCallback((e) => {
     if (!containerRef.current || !duration) return;
-    if (!hasInteractedRef.current) {
-      hasInteractedRef.current = true;
-      setHasInteracted(true);
-    }
 
     // Pinch detection (two touches)
     if (e.touches && e.touches.length === 2) {
@@ -996,21 +990,9 @@ export function WaveformVisualizer({
         </div>
       </div>
 
-      {/* Contextual hint — prominent for first-time users, compact after interaction */}
-      {!hasInteracted && loopStart == null ? (
-        <div className={`flex items-center gap-2 px-3 py-1.5 mb-2 rounded-md text-xs ${
-          theme === 'dark'
-            ? 'bg-ember-500/10 border border-ember-500/20 text-ember-500'
-            : 'bg-amber-50 border border-amber-200 text-ember-700'
-        }`}>
-          <Scissors className="w-3.5 h-3.5 flex-shrink-0" />
-          <span>Drag on the waveform to select a region for focused analysis</span>
-        </div>
-      ) : (
-        <div className={`text-xs ${t.textDimmed} mb-2`}>
-          Click to seek | Drag to select region{loopStart != null ? ' | Drag edges to resize' : ''} | Scroll to pan | Ctrl+scroll to zoom{zoom > 1 && ' | Shift+drag to pan'}
-        </div>
-      )}
+      <div className={`font-mono text-[11px] ${t.textDimmed} mb-2`}>
+        click to seek · drag to loop{loopStart != null ? ' · drag edges to resize' : ''} · scroll to pan · ctrl+scroll to zoom{zoom > 1 && ' · shift+drag to pan'}
+      </div>
 
       {/* Main waveform canvas area */}
       <div

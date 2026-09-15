@@ -2,7 +2,7 @@
  * Lab auth client — single-user password session for the Remix Lab.
  *
  * The token from /api/auth is stored in localStorage and sent as a Bearer header
- * on every /api call that costs money (uploads, separation, instrument detection).
+ * on every /api call that costs money (uploads, separation).
  * Nothing in the browser is secret; the server verifies the HMAC.
  */
 

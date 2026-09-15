@@ -78,22 +78,6 @@ export function helperSaveStems(payload) {
   }, 180000);
 }
 
-/**
- * Write bytes the browser already has into ~/Music/Remix Lab/Stems/<folder>/[sub/]<name>.
- * @param {string} folder  "Artist - Title"
- * @param {string} name    filename
- * @param {ArrayBuffer|Blob} body
- * @param {string} [sub]   optional subfolder, e.g. "chops"
- */
-export function helperPutFile(folder, name, body, sub) {
-  const q = sub ? `?sub=${encodeURIComponent(sub)}` : '';
-  return request(`/stems/${encodeURIComponent(folder)}/${encodeURIComponent(name)}${q}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body,
-  }, 120000);
-}
-
 export function helperFileUrl(id) {
   return `${getHelperUrl()}/files/${id}`;
 }
