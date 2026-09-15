@@ -17,7 +17,7 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 
 ## Where Things Stand (handoff — updated 2026-09-15)
 
-**Deployed**: https://www.soundsauce.app — check `git log` against the last deploy; the simplification (this commit) is **not deployed yet** unless the Completed list below says so. Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` was valid on Sep 14). The menubar app (`app.soundsauce.remix-menubar` LaunchAgent) supervises the helper on :7331.
+**Deployed**: https://www.soundsauce.app runs `07b2be6` (the simplification) as of 2026-09-15. Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` was valid on Sep 14). The menubar app (`app.soundsauce.remix-menubar` LaunchAgent) supervises the helper on :7331.
 
 **Daily workflow**: menubar dot green → Lab → Cmd+V a link (a DRM'd SoundCloud link → pick the YouTube result it offers) → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → BPM / key chips + a first **sections** strip appear within seconds → Grab Vocals → auto-kept, in `/vault` → the **Stem Player** replaces the waveform, sections re-detected from the stems → fix any label by dragging / clicking → **To Live** → `~/Music/Remix Lab/Stems/<Artist - Title>/` (stems + `notes.txt` with the sections and bar numbers) → `/calc` if the key needs moving.
 
