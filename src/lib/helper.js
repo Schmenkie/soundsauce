@@ -78,6 +78,25 @@ export function helperSaveStems(payload) {
   }, 180000);
 }
 
+/**
+ * Start a "lock to tempo" render: the helper resamples each stem, bends it onto the grid
+ * with rubberband and writes the FLACs into ~/Music/Remix Lab/Stems/<folder>/.
+ * Returns a job id — poll it with helperLockJob().
+ * @param {{ folder: string, files: {name:string,url:string}[], lock: object, notes?: string }} payload
+ * @returns {Promise<{ id: string }>}
+ */
+export function helperStartLock(payload) {
+  return request('/lock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }, 60000);
+}
+
+export function helperLockJob(id) {
+  return request(`/lock/${id}`);
+}
+
 export function helperFileUrl(id) {
   return `${getHelperUrl()}/files/${id}`;
 }

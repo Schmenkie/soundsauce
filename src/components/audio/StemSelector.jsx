@@ -194,6 +194,7 @@ export function StemSelector({
   onSaveToLive, // callback() — helper writes stems into ~/Music/Remix Lab/Stems/ (null when helper offline)
   onKeepStem, // callback(stemType) — re-host on permanent storage
   onKeepAll,
+  tempoLock, // <TempoLock> element — rendered under the toolbar (null when the helper is offline)
   onCancel,
   onReset, // start a new separation with a different mode
 
@@ -455,6 +456,8 @@ export function StemSelector({
           )}
         </div>
       </div>
+
+      {tempoLock && <div className="mb-4">{tempoLock}</div>}
 
       {/* Stem cards grid */}
       <div className={`grid ${gridCols} gap-2`}>

@@ -6,3 +6,4 @@ export { StemSelector } from './StemSelector';
 export { LinkImport } from './LinkImport';
 export { StemPlayer } from './StemPlayer';
 export { SectionStrip } from './SectionStrip';
+export { TempoLock } from './TempoLock';

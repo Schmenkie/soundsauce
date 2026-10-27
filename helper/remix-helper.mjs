@@ -7,10 +7,10 @@
  * It has to be local: yt-dlp can't run on Vercel and YouTube blocks datacenter IPs.
  *
  *   npm run helper                  # start (or it's included in `npm run dev:full`)
- *   brew install yt-dlp ffmpeg      # prerequisites
+ *   brew install yt-dlp ffmpeg      # prerequisites (rubber-band for "lock to tempo")
  *
  * Endpoints (CORS-restricted to the Lab's origins):
- *   GET  /health            -> { ok, ytdlp, ffmpeg, sourcesDir }
+ *   GET  /health            -> { ok, ytdlp, ffmpeg, rubberband, sourcesDir }
  *   POST /resolve {query}   -> { results: [{ url, title, artist, duration, thumbnail, source, isPlaylist }] }
  *                              query = URL (YouTube / SoundCloud / playlist) or free text (searches both)
  *   POST /jobs {url}        -> { id }               start a download + FLAC conversion
@@ -19,6 +19,9 @@
  *   GET  /files/:id/thumb   -> cover art (image/jpeg)
  *   POST /stems {folder, files:[{name,url}], notes}
  *                           -> { dir, files }     download stems into ~/Music/Remix Lab/Stems/<folder>/
+ *   POST /lock {folder, files:[{name,url}], lock, notes}
+ *                           -> { id }             same, but resampled + time-mapped onto a fixed grid
+ *   GET  /lock/:id          -> { status, phase, progress, result?, error? }
  *
  * Finished files are also copied to ~/Music/Remix Lab/Sources/ (and stems land in
  * ~/Music/Remix Lab/Stems/) so they show up in Live's browser once ~/Music/Remix Lab
@@ -36,6 +39,8 @@ const VERSION = '0.1.0';
 const PORT = Number(process.env.REMIX_HELPER_PORT) || 7331;
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
+const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
+const RUBBERBAND = process.env.RUBBERBAND_PATH || 'rubberband';
 const SOURCES_DIR = process.env.REMIX_SOURCES_DIR || path.join(os.homedir(), 'Music', 'Remix Lab', 'Sources');
 const STEMS_DIR = process.env.REMIX_STEMS_DIR || path.join(os.homedir(), 'Music', 'Remix Lab', 'Stems');
 const WORK_DIR = path.join(os.tmpdir(), 'remix-lab-helper');
@@ -433,9 +438,16 @@ function json(res, code, obj) {
 async function health() {
   let ytdlp = null;
   let ffmpeg = false;
+  let rubberband = null;
   try { ytdlp = (await run(YTDLP, ['--version'], { timeoutMs: 10000 })).stdout.trim(); } catch { /* not installed */ }
   try { await run(FFMPEG, ['-version'], { timeoutMs: 10000 }); ffmpeg = true; } catch { /* not installed */ }
-  return { ok: !!ytdlp && ffmpeg, version: VERSION, ytdlp, ffmpeg, sourcesDir: SOURCES_DIR, stemsDir: STEMS_DIR };
+  // Only "lock to tempo" needs rubberband, so a missing one doesn't make the helper unhealthy
+  // rubberband prints its version on stderr
+  try {
+    const out = await run(RUBBERBAND, ['--version'], { timeoutMs: 10000 });
+    rubberband = (out.stdout.trim() || out.stderr.trim() || 'installed').split('\n')[0];
+  } catch { /* optional — only "lock to tempo" needs it */ }
+  return { ok: !!ytdlp && ffmpeg, version: VERSION, ytdlp, ffmpeg, rubberband, canLock: !!rubberband && ffmpeg, sourcesDir: SOURCES_DIR, stemsDir: STEMS_DIR };
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +491,216 @@ async function saveStems({ folder, files, notes }) {
   return { dir, files: written };
 }
 
+// ---------------------------------------------------------------------------
+// lock to tempo -> Live's browser
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a stem onto a fixed grid. Three passes, and the order matters:
+ *
+ *   1. ffmpeg resample (varispeed) — does the whole-semitone part of the tempo move with
+ *      no artefacts whatsoever, because it is just playing the record faster or slower.
+ *   2. rubberband -3 with a time map — applies only what is left: a couple of percent,
+ *      plus the drift of a record cut without a click.
+ *   3. ffmpeg: prepend silence so the first downbeat is on a bar line, encode to FLAC.
+ *
+ * The trap, which fails silently: a time map needs an overall -t/-T/-D as well, and the
+ * duration has to match the map's last target frame. If it doesn't, rubberband computes
+ * a NaN ratio, warns, and passes the audio through completely unstretched. So -D is
+ * derived here from the map itself rather than trusted from the request.
+ */
+function spawnStep(cmd, args, { onLine, timeoutMs = 30 * 60 * 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let tail = '';
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${path.basename(cmd)} timed out`)); }, timeoutMs);
+    const feed = (d) => {
+      const text = d.toString();
+      tail = (tail + text).slice(-4000);
+      if (onLine) text.split(/[\r\n]+/).forEach(l => l && onLine(l));
+    };
+    child.stdout.on('data', feed);
+    child.stderr.on('data', feed);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err.code === 'ENOENT'
+        ? new Error(`${path.basename(cmd)} not found. Install it with: brew install ${cmd === RUBBERBAND ? 'rubberband' : 'ffmpeg'}`)
+        : err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(tail);
+      else reject(new Error(tail.split(/\n/).filter(Boolean).pop() || `${path.basename(cmd)} exited with code ${code}`));
+    });
+  });
+}
+
+async function probeSampleRate(file) {
+  const { stdout } = await run(FFPROBE, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate', '-of', 'csv=p=0', file]);
+  const rate = Number(stdout.trim().split(/\s+/)[0]);
+  if (!(rate > 0)) throw new Error(`Could not read the sample rate of ${path.basename(file)}`);
+  return rate;
+}
+
+/** Reject anything that would make rubberband misbehave, before we spend minutes on it. */
+function validateLock(lock) {
+  const sampleRate = Number(lock?.sampleRate);
+  const resampleRate = Number(lock?.resampleRate);
+  const map = lock?.timeMap;
+  if (!(sampleRate > 0) || !(resampleRate > 0)) throw new Error('lock.sampleRate and lock.resampleRate are required');
+  if (!Array.isArray(map) || map.length < 2) throw new Error('lock.timeMap needs at least two anchors');
+  let prevSrc = 0, prevTgt = 0;
+  for (const pair of map) {
+    const s = Number(pair?.[0]), t = Number(pair?.[1]);
+    if (!Number.isFinite(s) || !Number.isFinite(t) || s <= prevSrc || t <= prevTgt) {
+      throw new Error('lock.timeMap must be strictly increasing in both columns');
+    }
+    prevSrc = s; prevTgt = t;
+  }
+  return {
+    sampleRate,
+    resampleRate,
+    ratio: resampleRate / sampleRate,
+    padFrames: Math.max(0, Math.round(Number(lock.padFrames) || 0)),
+    map,
+    // -D comes from the map, never from the caller: if they disagree, rubberband silently
+    // does nothing at all.
+    outputDuration: prevTgt / sampleRate,
+  };
+}
+
+async function lockOneStem({ url, name, dir, workDir, lock, mapFile, onPhase }) {
+  let host;
+  try { host = new URL(url).hostname; } catch { host = ''; }
+  if (!name || !STEM_HOSTS.test(host)) throw new Error(`Refusing to fetch ${url}`);
+
+  onPhase('fetching', 0);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(res.status === 403 || res.status === 404
+      ? `${name}: stem has expired — re-separate the track`
+      : `${name}: download failed (${res.status})`);
+  }
+  const srcFile = path.join(workDir, 'source');
+  await fs.promises.writeFile(srcFile, Buffer.from(await res.arrayBuffer()));
+
+  // 1. varispeed: asetrate reinterprets the rate, aresample puts it back on the grid rate
+  onPhase('resampling', 0);
+  const inRate = await probeSampleRate(srcFile);
+  const pitchedFile = path.join(workDir, 'pitched.wav');
+  await spawnStep(FFMPEG, [
+    '-v', 'error', '-i', srcFile,
+    '-af', `asetrate=${Math.round(inRate * lock.ratio)},aresample=${lock.sampleRate}:filter_size=128`,
+    '-c:a', 'pcm_s24le', '-y', pitchedFile,
+  ]);
+
+  // 2. the remainder + the drift, as a time map
+  onPhase('stretching', 0);
+  const lockedFile = path.join(workDir, 'locked.wav');
+  await spawnStep(RUBBERBAND, [
+    '-3',                                   // R3 engine — slower, much cleaner
+    '-D', String(lock.outputDuration),      // must agree with the map's last target frame
+    '-M', mapFile,
+    pitchedFile, lockedFile,
+  ], {
+    onLine: (line) => {
+      const m = line.match(/(\d{1,3})%\s*$/);
+      if (m) onPhase('stretching', Math.min(99, Number(m[1])));
+    },
+  });
+
+  // 3. pad to a bar line and encode
+  onPhase('encoding', 0);
+  const outTmp = path.join(workDir, 'out.flac');
+  const encodeArgs = ['-v', 'error', '-i', lockedFile];
+  if (lock.padFrames > 0) encodeArgs.push('-af', `adelay=${lock.padFrames}S:all=1`);
+  encodeArgs.push('-c:a', 'flac', '-y', outTmp);
+  await spawnStep(FFMPEG, encodeArgs);
+
+  const dest = path.join(dir, name);
+  await fs.promises.rename(outTmp, dest).catch(async () => {
+    await fs.promises.copyFile(outTmp, dest);
+    fs.rmSync(outTmp, { force: true });
+  });
+  for (const f of [srcFile, pitchedFile, lockedFile]) fs.rmSync(f, { force: true });
+  return name;
+}
+
+/**
+ * Lock a set of stems to a tempo and write them into ~/Music/Remix Lab/Stems/<folder>/.
+ * Runs as a job: R3 is about 10x realtime, so four stems of a four-minute track is minutes.
+ */
+function startLockJob({ folder, files, lock, notes }) {
+  const validated = validateLock(lock);
+  const id = randomUUID();
+  const workDir = path.join(WORK_DIR, id);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const dirName = sanitizeForFilename(folder).trim() || 'Untitled';
+  const dir = path.join(STEMS_DIR, dirName);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const mapFile = path.join(workDir, 'timemap.txt');
+  fs.writeFileSync(mapFile, validated.map.map(([s, t]) => `${Math.round(s)} ${Math.round(t)}`).join('\n') + '\n');
+
+  const job = {
+    id,
+    status: 'running',
+    phase: 'starting',
+    progress: 0,
+    createdAt: Date.now(),
+    dir: workDir,
+    result: null,
+    error: null,
+    log: [],
+  };
+  jobs.set(id, job);
+
+  (async () => {
+    const written = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const name = sanitizeForFilename(files[i].name).trim();
+        job.phase = `${name} (${i + 1}/${files.length})`;
+        const base = (i / files.length) * 100;
+        const span = 100 / files.length;
+        written.push(await lockOneStem({
+          url: files[i].url,
+          name,
+          dir,
+          workDir,
+          lock: validated,
+          mapFile,
+          // fetch 10% / resample 15% / stretch 70% / encode 5% of each file's slice
+          onPhase: (stage, pct) => {
+            const offsets = { fetching: 0, resampling: 0.1, stretching: 0.25, encoding: 0.95 };
+            const widths = { fetching: 0.1, resampling: 0.15, stretching: 0.7, encoding: 0.05 };
+            job.progress = Math.round(base + span * (offsets[stage] + widths[stage] * (pct / 100)));
+          },
+        }));
+        log(`locked: ${dirName}/${name}`);
+      }
+      if (notes) {
+        fs.writeFileSync(path.join(dir, 'notes.txt'), notes);
+        written.push('notes.txt');
+      }
+      job.status = 'done';
+      job.progress = 100;
+      job.phase = 'done';
+      job.result = { dir, files: written };
+    } catch (err) {
+      job.status = 'error';
+      job.error = err.message;
+      log(`lock job ${id.slice(0, 8)} failed:`, err.message);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+      fs.mkdirSync(workDir, { recursive: true }); // the TTL scrubber expects job.dir to exist
+    }
+  })();
+
+  return job;
+}
+
 const server = http.createServer(async (req, res) => {
   cors(req, res);
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
@@ -510,6 +732,19 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { id: job.id });
     }
 
+    if (req.method === 'POST' && p === '/lock') {
+      const body = await readBody(req);
+      if (!body.folder || !Array.isArray(body.files) || body.files.length === 0) {
+        return json(res, 400, { error: 'folder and files[] required' });
+      }
+      const h = await health();
+      if (!h.rubberband) return json(res, 503, { error: 'rubberband is not installed — run: brew install rubberband' });
+      let job;
+      try { job = startLockJob(body); }
+      catch (err) { return json(res, 400, { error: err.message }); }
+      return json(res, 202, { id: job.id });
+    }
+
     if (req.method === 'POST' && p === '/stems') {
       const body = await readBody(req);
       if (!body.folder || !Array.isArray(body.files) || body.files.length === 0) {
@@ -518,7 +753,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await saveStems(body));
     }
 
-    let m = p.match(/^\/jobs\/([0-9a-f-]{36})$/);
+    let m = p.match(/^\/lock\/([0-9a-f-]{36})$/);
+    if (req.method === 'GET' && m) {
+      const job = jobs.get(m[1]);
+      if (!job) return json(res, 404, { error: 'Job not found' });
+      return json(res, 200, { status: job.status, phase: job.phase, progress: job.progress, result: job.result, error: job.error });
+    }
+
+    m = p.match(/^\/jobs\/([0-9a-f-]{36})$/);
     if (req.method === 'GET' && m) {
       const job = jobs.get(m[1]);
       if (!job) return json(res, 404, { error: 'Job not found' });
@@ -552,7 +794,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', async () => {
   const h = await health();
   log(`Remix Lab helper v${VERSION} on http://localhost:${PORT}`);
-  log(`yt-dlp: ${h.ytdlp || 'MISSING'} · ffmpeg: ${h.ffmpeg ? 'ok' : 'MISSING'}`);
+  log(`yt-dlp: ${h.ytdlp || 'MISSING'} · ffmpeg: ${h.ffmpeg ? 'ok' : 'MISSING'} · rubberband: ${h.rubberband || 'missing (no tempo lock)'}`);
   log(`sources folder: ${SOURCES_DIR}`);
   log(`stems folder:   ${STEMS_DIR}`);
   if (!h.ok) log('Install prerequisites: brew install yt-dlp ffmpeg');

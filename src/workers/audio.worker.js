@@ -631,6 +631,223 @@ function detectSections(layers, sampleRate, { bpm = 0, gridOffset = 0 } = {}) {
 }
 
 // =============================================================================
+// Beat tracking — the grid a tempo lock is bent onto
+// =============================================================================
+//
+// Run this on the FULL MIX or the instrumental, never the vocal: the whole method is
+// transients, and an acapella has almost none (that is exactly why Live's Auto-Warp
+// gives up on one). Spectral-flux onset envelope -> Ellis-style dynamic-programming beat
+// tracker -> sub-frame refine -> local linear fit of beat index against time. The last
+// step matters twice: it removes frame quantisation, and it keeps the stretch ratio the
+// renderer derives from these beats smooth, which is what stops the audio warbling.
+
+const BEAT_TARGET_SR = 22050;
+const BEAT_HOP = 256;
+const BEAT_WIN = 1024;
+const BEAT_SMOOTH = 16;   // ± beats in the local linear fit
+const BEAT_TIGHTNESS = 680; // DP penalty on straying from the global period
+
+/**
+ * Spectral flux onset envelope, plus per-frame low-band magnitude (for the downbeat).
+ * @returns {{ env: Float32Array, low: Float32Array, fps: number, frames: number }}
+ */
+function onsetEnvelope(channelData, sampleRate) {
+  // Decimate to ~22 kHz — beats live well below Nyquist and this is 2× less FFT
+  const by = Math.max(1, Math.round(sampleRate / BEAT_TARGET_SR));
+  const sr = sampleRate / by;
+  const n = Math.floor(channelData.length / by);
+  const x = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let k = 0; k < by; k++) s += channelData[i * by + k];
+    x[i] = s / by;
+  }
+
+  const fps = sr / BEAT_HOP;
+  const frames = Math.max(0, Math.floor((n - BEAT_WIN) / BEAT_HOP));
+  const flux = new Float32Array(frames);
+  const low = new Float32Array(frames);
+  if (!frames) return { env: flux, low, fps, frames };
+
+  const win = new Float32Array(BEAT_WIN);
+  for (let i = 0; i < BEAT_WIN; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (BEAT_WIN - 1));
+  const re = new Float32Array(BEAT_WIN);
+  const im = new Float32Array(BEAT_WIN);
+  const prev = new Float32Array(BEAT_WIN / 2);
+  const lowBin = Math.max(1, Math.round(150 / sr * BEAT_WIN));
+
+  for (let f = 0; f < frames; f++) {
+    const off = f * BEAT_HOP;
+    for (let i = 0; i < BEAT_WIN; i++) { re[i] = x[off + i] * win[i]; im[i] = 0; }
+    fft(re, im);
+    let sum = 0, lo = 0;
+    for (let k = 0; k < BEAT_WIN / 2; k++) {
+      // log magnitude: a hat on top of a loud drop still reads as an onset
+      const m = Math.log1p(100 * Math.hypot(re[k], im[k]));
+      const d = m - prev[k];
+      if (d > 0) sum += d;
+      prev[k] = m;
+      if (k <= lowBin) lo += m;
+    }
+    flux[f] = sum;
+    low[f] = lo;
+  }
+
+  // Subtract a local mean so a loud section does not outvote a quiet one, then normalise
+  const env = new Float32Array(frames);
+  const W = Math.max(1, Math.round(fps * 0.8));
+  let running = 0;
+  for (let f = 0; f < Math.min(frames, W); f++) running += flux[f];
+  let lo = 0, hi = Math.min(frames, W);
+  for (let f = 0; f < frames; f++) {
+    const want = Math.max(0, f - W), wantHi = Math.min(frames, f + W);
+    while (lo < want) { running -= flux[lo++]; }
+    while (hi < wantHi) { running += flux[hi++]; }
+    env[f] = Math.max(0, flux[f] - running / (hi - lo));
+  }
+  let max = 0;
+  for (let f = 0; f < frames; f++) if (env[f] > max) max = env[f];
+  if (max > 0) for (let f = 0; f < frames; f++) env[f] /= max;
+
+  return { env, low, fps, frames };
+}
+
+/** Autocorrelation of the onset envelope at a beat period, summed over 1/2/4 beats. */
+function tempoScore(env, frames, lagFrames) {
+  let total = 0, count = 0;
+  for (const mult of [1, 2, 4]) {
+    const L = Math.round(lagFrames * mult);
+    if (L < 1 || L >= frames) continue;
+    for (let f = 0; f + L < frames; f++) { total += env[f] * env[f + L]; count++; }
+  }
+  return count ? total / count : 0;
+}
+
+/** Coarse-then-fine search for the global tempo. */
+function globalTempo(env, frames, fps, minBpm, maxBpm) {
+  let best = { bpm: 0, score: -1 };
+  for (let bpm = minBpm; bpm <= maxBpm; bpm += 0.5) {
+    const score = tempoScore(env, frames, 60 / bpm * fps);
+    if (score > best.score) best = { bpm, score };
+  }
+  const from = Math.max(minBpm, best.bpm - 0.5);
+  const to = Math.min(maxBpm, best.bpm + 0.5);
+  for (let bpm = from; bpm <= to; bpm += 0.02) {
+    const score = tempoScore(env, frames, 60 / bpm * fps);
+    if (score > best.score) best = { bpm, score };
+  }
+  return best;
+}
+
+/** Local linear fit of beat index -> time over ±K beats. Smooths the tempo curve. */
+function smoothBeats(times, K) {
+  return times.map((_, i) => {
+    const a = Math.max(0, i - K);
+    const z = Math.min(times.length - 1, i + K);
+    let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let j = a; j <= z; j++) { n++; sx += j; sy += times[j]; sxx += j * j; sxy += j * times[j]; }
+    const den = n * sxx - sx * sx;
+    if (!den) return times[i];
+    const slope = (n * sxy - sx * sy) / den;
+    return (sy - slope * sx) / n + slope * i;
+  });
+}
+
+/**
+ * Track the beats of a piece of audio.
+ * @param {Float32Array} channelData mono samples — the mix or the instrumental
+ * @param {number} sampleRate
+ * @param {{ minBpm?: number, maxBpm?: number }} [options]
+ * @returns {{ beats: number[], bpm: number, tempoRange: {min:number,max:number},
+ *             downbeatIndex: number, confidence: number, trackedBpm: number }}
+ */
+function detectBeats(channelData, sampleRate, { minBpm = 70, maxBpm = 190 } = {}) {
+  const { env, low, fps, frames } = onsetEnvelope(channelData, sampleRate);
+  if (frames < 64) return { beats: [], bpm: 0, tempoRange: { min: 0, max: 0 }, downbeatIndex: 0, confidence: 0, trackedBpm: 0 };
+
+  const { bpm: trackedBpm } = globalTempo(env, frames, fps, minBpm, maxBpm);
+  const tau = 60 / trackedBpm * fps;
+
+  // Ellis DP: maximise (onset strength at each beat) − tightness × log(interval/τ)²
+  const lo = Math.max(1, Math.round(tau * 0.55));
+  const hi = Math.round(tau * 1.75);
+  const cost = new Float64Array(frames).fill(-1e18);
+  const back = new Int32Array(frames).fill(-1);
+  for (let t = 0; t < frames; t++) {
+    if (t < hi) { cost[t] = env[t]; continue; }
+    let bestScore = -1e18, bestPrev = -1;
+    for (let d = lo; d <= hi; d++) {
+      const v = t - d;
+      if (v < 0) break;
+      const r = Math.log(d / tau);
+      const s = cost[v] - BEAT_TIGHTNESS * r * r;
+      if (s > bestScore) { bestScore = s; bestPrev = v; }
+    }
+    cost[t] = env[t] + bestScore;
+    back[t] = bestPrev;
+  }
+  let end = -1, endScore = -1e18;
+  for (let t = Math.max(0, frames - hi); t < frames; t++) if (cost[t] > endScore) { endScore = cost[t]; end = t; }
+  const frameIdx = [];
+  for (let t = end; t >= 0; t = back[t]) frameIdx.push(t);
+  frameIdx.reverse();
+  if (frameIdx.length < 4) return { beats: [], bpm: 0, tempoRange: { min: 0, max: 0 }, downbeatIndex: 0, confidence: 0, trackedBpm };
+
+  // Sub-frame: parabolic peak of the envelope within ±2 frames of each beat
+  const refined = frameIdx.map((f) => {
+    let bf = f, bv = -1;
+    for (let d = -2; d <= 2; d++) {
+      const g = f + d;
+      if (g < 1 || g >= frames - 1) continue;
+      if (env[g] > bv) { bv = env[g]; bf = g; }
+    }
+    const y0 = env[bf - 1] || 0, y1 = env[bf] || 0, y2 = env[bf + 1] || 0;
+    const den = y0 - 2 * y1 + y2;
+    const dx = den !== 0 ? 0.5 * (y0 - y2) / den : 0;
+    return (bf + Math.max(-1, Math.min(1, dx))) / fps;
+  });
+
+  const smooth = smoothBeats(refined, BEAT_SMOOTH);
+  // The fit can in principle go flat; a non-increasing grid is unusable downstream
+  const beats = [];
+  for (const t of smooth) if (!beats.length || t > beats[beats.length - 1] + 1e-6) beats.push(t);
+
+  // Downbeat: of the four phases, the one whose beats carry the most low end
+  let downbeatIndex = 0, bestLow = -1;
+  for (let p = 0; p < 4; p++) {
+    let sum = 0, n = 0;
+    for (let i = p; i < beats.length; i += 4) {
+      const f = Math.round(beats[i] * fps);
+      if (f >= 0 && f < frames) { sum += low[f]; n++; }
+    }
+    if (n && sum / n > bestLow) { bestLow = sum / n; downbeatIndex = p; }
+  }
+
+  // How well the grid sits on the onsets — a vocal-only file scores near zero
+  let align = 0;
+  for (const t of beats) {
+    const p = t * fps, f = Math.floor(p), fr = p - f;
+    if (f >= 0 && f + 1 < frames) align += env[f] * (1 - fr) + env[f + 1] * fr;
+  }
+  align /= beats.length || 1;
+
+  const gaps = [];
+  for (let i = 1; i < beats.length; i++) gaps.push(60 / (beats[i] - beats[i - 1]));
+  gaps.sort((a, b) => a - b);
+
+  return {
+    beats: beats.map(t => Math.round(t * 1e6) / 1e6),
+    bpm: gaps.length ? gaps[gaps.length >> 1] : trackedBpm,
+    tempoRange: { min: gaps[0] || 0, max: gaps[gaps.length - 1] || 0 },
+    downbeatIndex,
+    // Calibrated so a full mix lands around 70 and a vocal-only file (which tracks the
+    // wrong tempo entirely) around 25 — the UI warns below 40.
+    confidence: Math.max(0, Math.min(100, Math.round(align * 500))),
+    trackedBpm,
+  };
+}
+
+// =============================================================================
 // Message handler
 // =============================================================================
 
@@ -647,6 +864,10 @@ self.onmessage = function(e) {
 
       case 'DETECT_KEY':
         result = detectKey(new Float32Array(payload.channelData), payload.sampleRate);
+        break;
+
+      case 'DETECT_BEATS':
+        result = detectBeats(new Float32Array(payload.channelData), payload.sampleRate, payload.options || {});
         break;
 
       case 'DETECT_SECTIONS':

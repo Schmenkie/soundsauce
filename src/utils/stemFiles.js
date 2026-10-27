@@ -115,6 +115,15 @@ export function buildPackFolderName(meta) {
   return artist && !/^unknown artist$/i.test(artist) ? `${artist} - ${title}` : title;
 }
 
+/**
+ * Folder for a tempo-locked export. Its own folder, not the track's: the locked stems
+ * have a different tempo, key and notes.txt from the originals, and dropping both sets in
+ * one folder would overwrite the notes and leave two sets of FLACs you can't tell apart.
+ */
+export function buildLockedFolderName(meta, targetBpm) {
+  return `${buildPackFolderName(meta)} - locked ${Math.round(targetBpm * 100) / 100}`;
+}
+
 /** Filename for the Remix Pack zip. */
 export function buildPackFilename(meta) {
   return `${buildPackFolderName(meta)} - Remix Pack.zip`;
@@ -128,8 +137,9 @@ export function buildPackFilename(meta) {
  * @param {object} meta   { artist, title, bpm, key, … }
  * @param {string[]} stemTypes
  * @param {string} mode
- * @param {{ sections?: { label: string, start: number }[], gridOffset?: number }} [extras]
- *   section labels (intro / breakdown / buildup / drop / outro) with bar numbers
+ * @param {{ sections?: { label: string, start: number }[], gridOffset?: number, lock?: object }} [extras]
+ *   section labels (intro / breakdown / buildup / drop / outro) with bar numbers, and the
+ *   planTempoLock() result when these stems were rendered onto a fixed grid
  */
 export function buildPackNotes(meta, stemTypes, mode, extras = {}) {
   const lines = [];
@@ -157,6 +167,18 @@ export function buildPackNotes(meta, stemTypes, mode, extras = {}) {
       }
     }
   }
+  const lock = extras.lock;
+  if (lock) {
+    const pct = v => `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(2)}%`;
+    lines.push('');
+    lines.push('LOCKED TO TEMPO — drop these in with Warp OFF.');
+    lines.push(`  Original: ${lock.sourceBpm.toFixed(2)} BPM${lock.sourceRange ? ` (drifting ${lock.sourceRange.min.toFixed(1)}–${lock.sourceRange.max.toFixed(1)})` : ''}${lock.sourceKey?.key ? `, ${displayKeyName(lock.sourceKey)} ${lock.sourceKey.mode}` : ''}`);
+    lines.push(`  Now:      ${lock.targetBpm} BPM exactly${lock.resultKey?.key ? `, ${displayKeyName(lock.resultKey)} ${lock.resultKey.mode}${lock.resultKey.camelot ? ` (Camelot ${lock.resultKey.camelot})` : ''}` : ''}`);
+    lines.push(`  Pitch:    ${lock.semitones === 0 ? 'unchanged' : `${lock.semitones > 0 ? '+' : '-'}${Math.abs(lock.semitones)} semitone${Math.abs(lock.semitones) === 1 ? '' : 's'} by resampling (no time-stretch artefacts)`}`);
+    lines.push(`  Stretch:  ${pct(lock.stretch.min)} to ${pct(lock.stretch.max)} (median ${pct(lock.stretch.median)}) — a plain stretch would have been ${pct(lock.naiveStretchPercent)}`);
+    lines.push(`  Bar 1:    at 0:00 — ${lock.padSeconds.toFixed(3)}s of silence was added so the first downbeat lands on a bar line.`);
+    lines.push('  Drop every stem at 1|1|1 with Warp off and they are in place.');
+  }
   if (Array.isArray(extras.sections) && extras.sections.length) {
     const barSec = meta?.bpm ? 240 / meta.bpm : 0;
     const off = extras.gridOffset || 0;
@@ -175,9 +197,15 @@ export function buildPackNotes(meta, stemTypes, mode, extras = {}) {
   }
   lines.push('');
   lines.push('Ableton tips:');
-  lines.push('  - Drop all stems onto the arrangement at once; Live warps them to the set tempo.');
-  lines.push('  - Vocals: Complex Pro warp mode. Keep pitch/tempo shifts under ~10% for clean results.');
-  lines.push('  - Instrumental: Complex or Complex Pro. Beats mode if you only need the transients.');
+  if (lock) {
+    lines.push(`  - Set the project to ${lock.targetBpm} BPM, drop all stems at 1|1|1 and turn Warp OFF.`);
+    lines.push('  - Warp on would re-stretch audio that is already on the grid. Leave it off.');
+    lines.push('  - The unlocked originals are still in the Vault if you want to warp them yourself.');
+  } else {
+    lines.push('  - Drop all stems onto the arrangement at once; Live warps them to the set tempo.');
+    lines.push('  - Vocals: Complex Pro warp mode. Keep pitch/tempo shifts under ~10% for clean results.');
+    lines.push('  - Instrumental: Complex or Complex Pro. Beats mode if you only need the transients.');
+  }
   lines.push('');
   lines.push(`Separated with SoundSauce Remix Lab (Demucs, ${mode}) on ${new Date().toISOString().slice(0, 10)}`);
   return lines.join('\n');

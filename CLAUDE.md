@@ -19,17 +19,20 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 
 **Deployed**: https://www.soundsauce.app runs `07b2be6` (the simplification) as of 2026-09-15. Deploy with `vercel build --prod && vercel deploy --prebuilt --prod` (CLI login `scurnow24-2856` was valid on Sep 14). The menubar app (`app.soundsauce.remix-menubar` LaunchAgent) supervises the helper on :7331.
 
-**Daily workflow**: menubar dot green → Lab → Cmd+V a link (a DRM'd SoundCloud link → pick the YouTube result it offers) → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → BPM / key chips + a first **sections** strip appear within seconds → Grab Vocals → auto-kept, in `/vault` → the **Stem Player** replaces the waveform, sections re-detected from the stems → fix any label by dragging / clicking → **To Live** → `~/Music/Remix Lab/Stems/<Artist - Title>/` (stems + `notes.txt` with the sections and bar numbers) → `/calc` if the key needs moving.
+**Daily workflow**: menubar dot green → Lab → Cmd+V a link (a DRM'd SoundCloud link → pick the YouTube result it offers) → FLAC in the Lab + `~/Music/Remix Lab/Sources/` → BPM / key chips + a first **sections** strip appear within seconds → Grab Vocals → auto-kept, in `/vault` → the **Stem Player** replaces the waveform, sections re-detected from the stems → fix any label by dragging / clicking → **To Live** → `~/Music/Remix Lab/Stems/<Artist - Title>/` (stems + `notes.txt` with the sections and bar numbers), or **Lock to tempo** → type your project BPM → stems rendered onto an exact grid in `…/<Artist - Title> - locked <bpm>/`, drop them at 1|1|1 with Warp off → `/calc` if the key needs moving.
 
 **Direction decisions Spencer made (don't re-litigate)**:
 - 2026-09-15: **"I just want a tool that gives me stems, what key, bpm, and labels for the different sections of the song."** Keep: stems, Stem Player, Calculator, Vault (with "mixes with"). Cut: the preset / recreate flow, Anatomy, Vocal Chop Kit, Notes, tags, 4-stem re-separate from the Vault, batch grab. Sections: auto-detect then edit, DJ vocabulary, shown on the Lab timeline; once stems are ready the Stem Player is the only timeline.
 - 2026-09-14: single user, local helper, password-gated GPU. No analytics. Ableton only.
 
+**Not deployed yet**: lock to tempo (Oct 26 2026) is on `main` but the live site is still `07b2be6`. It needs no new env vars; the helper side only needs `brew install rubberband` on this Mac.
+
 **Suggested next things**:
 1. **Section detector tuning** — it's an energy heuristic (see below). Judge it on real tracks over a week; the knobs are the band weights, the 0.2 novelty step, the p80 − 0.25 drop cut and the buildup rise threshold in `detectSections()`. Keep a few hand-labelled tracks as a fixture before tuning (the vault's `sections` with `sectionsSource: 'manual'` are exactly that).
 2. **Blob budget reality** — long tracks cost ~120–215 MB, not 55; consider not keeping the source upload.
 3. **Helper title cleanup** — YouTube titles like "Lauren (Official Visualiser) | Ministry of Sound" get through `splitArtistTitle()`; strip `| Label` suffixes and "(Official Visualiser)".
-4. Parked: mashup preview (Stem Player engine + playbackRate), Vault as a Camelot wheel, `.als` generation with locators from the sections.
+4. **Lock to tempo from the Vault** — the button only exists in the Lab today; the Vault would have to fetch and decode a stem to beat-track it.
+5. Parked: mashup preview (Stem Player engine + playbackRate), Vault as a Camelot wheel, `.als` generation with locators from the sections.
 
 **Gotchas for whoever picks this up**
 - The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`). In that pane **Enter doesn't submit forms and `form_input` doesn't fire React onChange** — set the value with the native setter + an `input` event, then click buttons. Its screenshots render at quarter size; use `read_page` / `get_page_text` / `javascript_tool` for facts. Synthetic `PointerEvent`s do drive the section strip (there's a try/catch around `setPointerCapture`).
@@ -39,6 +42,8 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 - `npm run dev:full` starts a second helper that loses the fight for :7331 to the menubar one — harmless, the first one answers. An orphan can be cleared with `pkill -f remix-helper.mjs`.
 - Key detection ground truth: `scripts/key-truth.json` (117 tracks, Camelot codes from Rekordbox). Re-run `node scripts/key-bench.mjs` after touching `detectKey`; the numbers to beat are in the comment above `KEY_DETECT_DEFAULTS`. Both scripts eval the worker source directly, so the worker must stay free of `import`s.
 - `useToast()` returns `{ toast }` — destructure it.
+- **rubberband time maps fail silently.** A `-M` map needs an overall `-D` matching the map's last target frame, or it emits NaN and passes the audio through unstretched (exit 0). Never write a `0 0` anchor either — it's a 0/0 segment with the same warning. Also: this Mac's ffmpeg has no soxr, so `aresample=…:resampler=soxr` errors out; use `filter_size=`.
+- Beat tracking (`DETECT_BEATS`) must never be run on a vocal stem — it tracks half-tempo and is wrong. Confidence under 40 means "we were handed the wrong stem".
 - `src/data/helperGuide.js` is the in-app manual — **update it whenever a button is added, renamed or moved.**
 - The Playwright guide test force-clicks the floating icon (it idles on an infinite animation).
 
@@ -57,7 +62,8 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 | Zip | `fflate` (Remix Pack) |
 | Animation | `motion/react` (Dock, modals) |
 | Icons | `lucide-react` (must stay in `package.json` deps — a missing entry broke Vercel builds in May 2026) |
-| Testing | Vitest (39 tests: DSP helpers, remix math, a11y) + Playwright smoke tests (`e2e/smoke.spec.js`: routes, helper guide, sign-in dialog) |
+| Tempo lock | `rubberband` 4 + ffmpeg on the Mac, driven by the helper (`brew install rubberband`) |
+| Testing | Vitest (51 tests: DSP helpers, remix math, tempo lock, a11y) + Playwright smoke tests (`e2e/smoke.spec.js`: routes, helper guide, sign-in dialog) |
 | Deploy | Vercel (`vercel build --prod && vercel deploy --prebuilt --prod`) |
 
 ## Project Structure
@@ -74,7 +80,7 @@ audio-analyzer-pro/
 │   ├── separate-stems.js        # Start Demucs prediction: mode vocals|stems4|stems6, quality best|fast, FLAC
 │   └── check-stems.js           # Poll prediction; returns whatever stem keys the mode produced
 ├── helper/
-│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files, POST /stems
+│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files, POST /stems, POST /lock
 │   ├── install-launchagent.sh   # Installs the helper alone as a LaunchAgent (npm run helper:install)
 │   └── menubar/                 # rumps menubar app (status dot, supervises the helper) + install.sh (npm run menubar:install)
 ├── scripts/
@@ -95,7 +101,8 @@ audio-analyzer-pro/
 │   │   ├── layout/PageLayout.jsx
 │   │   ├── audio/               # LinkImport (paste link / search / DRM fallback), AudioUploadSection (drop zone; one line once loaded),
 │   │   │                        # WaveformVisualizer, PlaybackControls, SpectrumAnalyzer (all three only until stems are ready),
-│   │   │                        # StemSelector (mode picker → progress → stem rows), StemPlayer (arrangement map), SectionStrip (section labels)
+│   │   │                        # StemSelector (mode picker → progress → stem rows), StemPlayer (arrangement map), SectionStrip (section labels),
+│   │   │                        # TempoLock (target BPM → semitone/stretch readout → locked FLACs)
 │   │   └── ui/                  # ErrorBoundary, Toast, SaucyHelper (tips + "What does this do?" manual)
 │   ├── hooks/
 │   │   ├── useAudioProcessor.js # Web Audio playback + waveform (+ detectTempoAndKey / detectSections proxies to the worker)
@@ -113,13 +120,14 @@ audio-analyzer-pro/
 │   │   └── NotFound.jsx
 │   ├── utils/
 │   │   ├── sections.js          # SECTION_LABELS, SECTION_COLORS, barAtTime()
+│   │   ├── tempoLock.js         # Pure lock math: planTempoLock(), buildTimeMap(), mapTimeThroughLock(), bestResampleSemitones()
 │   │   ├── remixMath.js         # Pure calculator math: camelotOf, relativeKey, transposeSemitones, tempoChange, warpAdvice, compatibleTargets
 │   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl / saveStemsToLive / keepStemUrl
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes (with sections)
 │   │   └── constants.js         # themeClasses
 │   ├── data/helperGuide.js      # The floating helper's manual: every button per page + its cost tag — keep it in sync with UI changes
-│   └── workers/audio.worker.js  # FFT, detectBPM, detectKey, detectSections, waveform min/max + colours
+│   └── workers/audio.worker.js  # FFT, detectBPM, detectKey, detectBeats, detectSections, waveform min/max + colours
 ├── .claude/launch.json          # "dev" (Vite only) and "full" (Vite + dev-api + helper) preview configs
 ├── vercel.json                  # SPA rewrite, CSP + security headers
 └── vite.config.js               # /api → :3001 proxy in dev, vendor chunks, vitest config
@@ -214,6 +222,52 @@ Worker `DETECT_SECTIONS` → `detectSections(layers, sampleRate, { bpm, gridOffs
 
 `SectionStrip.jsx` is a full-track overview (always 0 → duration, regardless of waveform zoom): click a block → `onSeek(start)`; drag a block's left edge → boundary moves, snapped to bars, `onChange` on release; click the label → menu with the five labels + remove; "+" adds a section at `positionRef.current` (drop after anything but a drop, else breakdown). It takes a `positionRef` (full-mix `playbackTimeRef` or the Stem Player's `positionRef`) and draws the playhead from it at 60 fps. `gutterWidth` matches the Stem Player's label column so the strip lines up with the lanes.
 
+### Lock to tempo
+
+For a record cut without a click (the one that started this drifts 148.9–153.2 BPM) or an
+acapella Live's Auto-Warp can't grid, the Lab can render the stems onto an exact grid so
+they go into a project with **Warp off**. `TempoLock.jsx` sits in the stems-ready panel next
+to "To Live"; the maths is pure in `utils/tempoLock.js`, the render happens on the Mac.
+
+1. **Beat-track** — worker `DETECT_BEATS` → `detectBeats(channelData, sampleRate)`: spectral
+   flux onset envelope (1024-pt FFT, 256 hop at ~22 kHz, local-mean subtracted), Ellis-style
+   DP beat tracker, parabolic sub-frame refine, then a local linear fit of beat index against
+   time over ±16 beats. The fit matters twice — it removes frame quantisation *and* keeps the
+   stretch ratio smooth, which is what stops the output warbling. Returns `{ beats, bpm,
+   tempoRange, downbeatIndex, confidence }`. **Run it on the instrumental or the mix, never
+   the vocal**: on the reference track the instrumental gives 150.89 BPM at confidence 95 and
+   the vocal 75.97 (half, and wrong) at 39. `Analyze.handleAnalyseBeats()` prefers
+   drums/other/bass and falls back to the full mix when the stem scores under 40.
+2. **Plan** — `planTempoLock({ beats, targetBpm, duration, sampleRate, key, downbeatIndex })`
+   splits the tempo move in two. The constant part is a **whole-semitone resample** (varispeed,
+   zero artefacts, and it lands the track in a named key); only the remainder plus the drift
+   becomes a time map. 150 → 132 is −2 semitones then 0.5–3.3% of stretch, not a flat −12%.
+   It returns the map as (sourceFrame, targetFrame) pairs, `outputDuration`, and `padFrames`
+   — silence to prepend so the first downbeat lands on a bar line, i.e. bar 1 at 0:00.
+3. **Render** — `POST /lock {folder, files, lock, notes}` on the helper starts a job
+   (`GET /lock/:id` for progress; R3 runs at about 10× realtime). Per stem:
+   `ffmpeg asetrate/aresample` → `rubberband -3 -D <dur> -M <map>` → `ffmpeg adelay` + FLAC,
+   into `~/Music/Remix Lab/Stems/<Artist - Title> - locked <bpm>/` (its own folder so the
+   unlocked stems and their notes.txt are untouched). Host allow-list as for `POST /stems`.
+
+**Two traps, both silent:**
+- A time map **requires** an overall `-t`/`-T`/`-D`, and its duration must match the map's
+  last target frame. If it doesn't, rubberband computes a NaN ratio, warns, and passes the
+  audio through *completely unstretched* with exit code 0. The helper therefore derives `-D`
+  from the map it was given and never trusts a duration from the client.
+- Don't write a `0 0` anchor: rubberband's implicit start is already (0,0), so an explicit
+  one makes a zero-length first segment whose ratio is 0/0 — same NaN warning. Leaving it out
+  gives the lead-in a clean 1:1.
+
+`buildPackNotes()` records the lock in notes.txt (original tempo and drift, semitones, the new
+key, min/median/max stretch, where bar 1 is), the stems are stamped with the new BPM and key,
+and the section markers are moved onto the new timeline with `lockedSections()`.
+
+Measured end to end: Lady Gaga "Just Dance" 119 → 128 BPM came out at 128.011 BPM, 1.2 ms mean
+/ 18.3 ms max from an exact grid. The drifting 1979 record: 132.003 BPM, 6.5 ms mean / 84.1 ms
+max, against 70.2 ms mean / 197.7 ms max for the rigid grid one Live warp marker gives you.
+Needs `brew install rubberband`; `/health` reports it as `rubberband` / `canLock`.
+
 ### Stem Player + Arrangement Map
 
 `useStemPlayer({ stemTypes, getStemAudio, onPlay })` owns a second AudioContext: every stem decoded once, one `AudioBufferSourceNode` per stem → per-stem `GainNode` → master, all started on the same timestamp. Mute/solo (`stemGain(type, muted, soloed)` — solo wins) only touch gains; seek and loop rebuild the sources; `positionRef` is read by the UI at 60 fps. It is mutually exclusive with the single-source player: `onPlay` pauses `useAudioProcessor`, and `handleTogglePlayback` / `handlePlayStem` call `stemPlayer.pause()`.
@@ -226,7 +280,7 @@ Worker `DETECT_SECTIONS` → `detectSections(layers, sampleRate, { bpm, gridOffs
 
 ### Web Worker (`/src/workers/audio.worker.js`)
 
-No imports (the key scripts eval its source). Messages: `DETECT_BPM`, `DETECT_KEY`, `DETECT_SECTIONS`, `GENERATE_WAVEFORM_DATA` (hi-res min/max), `GENERATE_WAVEFORM_COLORS` (spectral-centroid colour map). Helpers: `fft`, `computeMagnitudeSpectrum`, `biquad`, `accumulateBarPower`, `normaliseBars`. The old feature extraction (instruments, MFCCs, ADSR, filter envelope, modulation, spectral match, wavetable, anatomy) is gone — `checkpoint-before-simplify` has it.
+No imports (the key scripts eval its source). Messages: `DETECT_BPM`, `DETECT_KEY`, `DETECT_BEATS`, `DETECT_SECTIONS`, `GENERATE_WAVEFORM_DATA` (hi-res min/max), `GENERATE_WAVEFORM_COLORS` (spectral-centroid colour map). Helpers: `fft`, `computeMagnitudeSpectrum`, `biquad`, `accumulateBarPower`, `normaliseBars`. The old feature extraction (instruments, MFCCs, ADSR, filter envelope, modulation, spectral match, wavetable, anatomy) is gone — `checkpoint-before-simplify` has it.
 
 ### `/src/hooks/useAudioProcessor.js`
 
@@ -343,6 +397,7 @@ The product is: *paste a link → stems · key · BPM · section labels.*
 | 5 | **Remix Calculator** (`/calc`) | ✅ | Transpose / tempo / warp advice |
 | 6 | **Stem Player** | ✅ | Synced mute/solo, lanes, bar grid, drag-to-loop |
 | 7 | **Sections** | ✅ | Auto-detected (mix → stems), editable, saved, in notes.txt |
+| 8 | **Lock to tempo** | ✅ | Beat-track → whole-semitone resample + time map → stems already on the grid, Warp off |
 | — | Removed 2026-09-15 | git | Analyzer / presets / Vital, Anatomy, Vocal Chop Kit, Notes, tags, batch grab, Gemini — `checkpoint-before-simplify` |
 | — | Later | Ideas | Section detector tuning against hand-labelled tracks, mashup preview, `.als` with locators from sections, Vault as a Camelot wheel |
 
@@ -352,8 +407,11 @@ The product is: *paste a link → stems · key · BPM · section labels.*
 - `Settings.jsx` and `SaucyHelper` still use the re-pointed `zinc/stone/amber` tokens. Cosmetic.
 - `e2e/smoke.spec.js` doesn't exercise the Stem Player or sections (needs a vault track + token).
 - Section detection is a heuristic tuned on five house / hip-hop / R&B tracks. Expect to drag a boundary or two on anything unusual.
+- Lock to tempo is Lab-only: the Vault's "to live" has no lock option, because beat tracking needs the audio decoded. Also no "keep the pitch" toggle in the UI, though `planTempoLock({ semitones: 0 })` supports it.
 
 ## Completed
+
+- [x] **Lock to tempo** (Oct 26 2026) — stems can be exported already fixed to a target BPM, so they go into Live with Warp off. Built after a 1979 acapella at ~150 BPM (drifting 148.9–153.2) couldn't be fitted to a 132 project by hand: too few transients for Auto-Warp or our own `detectBPM` (confidence 18, answer 158). New `utils/tempoLock.js` (pure, 12 vitest), worker `DETECT_BEATS`, helper `POST /lock` + `GET /lock/:id` (+ `rubberband` / `canLock` in `/health`), `components/audio/TempoLock.jsx` in the stems-ready panel, `buildLockedFolderName()` and the lock block in `buildPackNotes()`, `helperGuide.js` entry. Verified end to end in the browser on the vault's "Just Dance": 119 → 128 BPM, +1 st → F major, output measured 128.011 BPM at 1.2 ms mean / 18.3 ms max from an exact grid. The drifting record through the same render: 132.003 BPM, 6.5 ms / 84.1 ms, against 70.2 ms / 197.7 ms for a single rigid warp marker. 51 vitest, lint clean of new errors.
 
 - [x] **Simplification + sections** (Sep 15 2026) — Spencer: "I just want a tool that gives me stems, what key, bpm, and labels for the different sections of the song." Tagged `checkpoint-before-simplify`, then deleted the recreate/preset flow (`components/analysis/`, `PresetSelector`, `InstrumentSelector`, `AnalyzeSection`, `ExportToolbar`, `vitalPresets`, `vitalPresetGenerator`, `demoSoundGenerator`, `dawPlugins`, `recommendations`, `SynthKnob`, `InstrumentIllustration`, `Tooltip`, Gemini `api/instrument.js`), Track Anatomy, the Vocal Chop Kit (+ helper `PUT /stems`), Remix Notes (`/notes`, `api/notes.js`, `_vaultIndex.js`), Vault tags / notes link / 4-stem re-separate, batch grab, prefs (DAW / artist name), `MiniSpectrum` and ~2,400 lines of worker DSP. Worker 3,190 → 750 lines; `Analyze.jsx` 1,677 → ~560. Built: worker `detectSections` (energy segmentation, DJ labels), `SectionStrip.jsx` (jump / drag / rename / add / remove), `utils/sections.js`, sections + `gridOffset` on vault tracks and in `notes.txt`; the full-mix player now yields to the Stem Player once stems are ready; `helperGuide.js` rewritten; e2e updated. Verified in the Browser pane: vault restore → stems → "from stems" sections; helper import → "from the mix" sections over the waveform; drag / rename / add / remove; edits persisted to `vault/index.json` as `manual`. 39 vitest, 6 Playwright, build green.
 

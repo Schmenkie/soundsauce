@@ -22,7 +22,7 @@ export const COSTS = {
 export const COST_SUMMARY = [
   { cost: 'gpu', text: 'Only "Grab Vocals" / "Separate". Nothing else spends money.' },
   { cost: 'blob', text: 'The source upload before separation, auto-keep in Vocals mode, Keep / Keep all. A 3-minute track ≈ 55 MB, a 6-minute one ≈ 200 MB. Delete a track in the Vault to free it.' },
-  { cost: 'disk', text: 'Paste-a-link (Sources folder) and To Live (Stems folder). Delete them in Finder whenever.' },
+  { cost: 'disk', text: 'Paste-a-link (Sources folder), To Live and Lock to tempo (Stems folder). Delete them in Finder whenever.' },
   { cost: 'download', text: 'Remix Pack, per-stem download arrows, "save file". Nothing is stored anywhere else.' },
   { cost: 'free', text: 'Everything else: playing, the Stem Player, sections, the calculator.' },
 ];
@@ -33,6 +33,7 @@ export const GUIDE = {
       { title: 'Paste a link', tip: 'Cmd+V a YouTube or SoundCloud link anywhere on this page. The helper on your Mac turns it into a FLAC and loads it here.' },
       { title: 'Grab Vocals', tip: 'Vocals + Instrumental is the remix default — two lossless FLACs stamped with BPM and key, kept automatically.' },
       { title: 'Sections', tip: 'Intro / breakdown / buildup / drop / outro are guessed from the energy as soon as the track loads and refined once the stems land. Drag the edges or click a label if it got one wrong.' },
+      { title: 'Lock to tempo', tip: 'For a record that drifts, or an acapella Live cannot warp: pick your project tempo and get stems already on the grid. Resampling does most of the move, so it sounds like a varispeed, not a stretch.' },
       { title: 'Keys', tip: 'Space play/pause, arrows skip 5 s, Esc clears the loop — for whichever timeline is on screen.' },
     ],
     sections: [
@@ -74,6 +75,7 @@ export const GUIDE = {
           { name: 'Remix Pack', cost: 'download', what: 'Zip of every stem plus the same notes.txt, to Downloads.' },
           { name: 'Stem row: ↓', cost: 'download', what: 'Saves this one stem as a stamped FLAC.' },
           { name: 'kept / keep', cost: 'blob', what: '"KEPT" = permanent on Blob. "keep" = still on Replicate; click to re-host it (~25 MB per stem).' },
+          { name: 'Lock to tempo', cost: 'disk', what: 'Beat-tracks the instrumental, then writes a second set of FLACs rendered onto an exact grid at a tempo you type — drop them at 1|1|1 with Warp OFF. It resamples by whole semitones first (so the pitch moves a named amount and the key changes, shown before you commit) and only time-stretches the small remainder plus the record\'s own drift. They land in their own folder, \'<Artist - Title> - locked <bpm>\', so the originals and their notes.txt are untouched. Needs `brew install rubberband`; about half a minute per stem.' },
           { name: '↺ (reset)', cost: 'free', what: 'Clears the stems so you can separate again with another mode. The vault entry stays.' },
         ],
       },

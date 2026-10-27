@@ -9,12 +9,12 @@ import { useAuth } from '../contexts/AuthContext';
 // Components
 import { useToast } from '../components/ui/Toast';
 import { LabSignIn } from '../components/auth';
-import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, StemSelector, StemPlayer, SectionStrip, LinkImport } from '../components/audio';
+import { SpectrumAnalyzer, PlaybackControls, WaveformVisualizer, AudioUploadSection, StemSelector, StemPlayer, SectionStrip, LinkImport, TempoLock } from '../components/audio';
 import { Music, Loader2, AlertTriangle, UploadCloud, Download } from 'lucide-react';
 
 // Utils
 import { displayKeyName } from '../utils/stemFiles';
-import { saveBlob, mimeForExt, saveStemsToLive } from '../utils/remixPack';
+import { saveBlob, mimeForExt, saveStemsToLive, lockStemsToLive } from '../utils/remixPack';
 
 const ALLOWED_EXTENSIONS = ['wav', 'mp3', 'm4a', 'flac'];
 const ALLOWED_MIME_TYPES = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/x-flac'];
@@ -448,6 +448,35 @@ export function Analyze({ theme, t }) {
     }
   }, [stems, stemTypes, stemMeta, separationMode, sections, gridOffset, toast]);
 
+  // ---- Lock to tempo ----
+  // Beat-track the instrumental if there is one, else the full mix. Never the vocal: it
+  // has almost no transients, which is the whole reason Live's Auto-Warp fails on one.
+  const handleAnalyseBeats = useCallback(async () => {
+    const track = (buffer) => {
+      const by = Math.max(1, Math.round(buffer.sampleRate / 22050));
+      return audio.detectBeats(monoOf(buffer, by), buffer.sampleRate / by);
+    };
+    const preferred = ['drums', 'other', 'bass', 'piano', 'guitar'];
+    const stemBuffer = preferred.map(type => getStemBufferRef.current(type)).find(Boolean);
+    if (!stemBuffer && !audio.audioBuffer) throw new Error('Nothing to beat-track yet');
+    if (!stemBuffer) return track(audio.audioBuffer);
+
+    const fromStem = await track(stemBuffer);
+    // An acapella's "instrumental" is just bleed — when it tracks badly, the full mix is
+    // usually the better bet, so try both and keep whichever sits on the onsets better.
+    if (fromStem.confidence >= 40 || !audio.audioBuffer) return fromStem;
+    const fromMix = await track(audio.audioBuffer);
+    return fromMix.confidence > fromStem.confidence ? fromMix : fromStem;
+  }, [audio]);
+
+  const handleLockToLive = useCallback(async (plan, onProgress) => {
+    const urls = Object.fromEntries(stemTypes.map(type => [type, stems?.[type]]).filter(([, u]) => u));
+    if (!Object.keys(urls).length) throw new Error('No stems to lock');
+    const result = await lockStemsToLive(urls, stemMeta, separationMode, plan, { sections, gridOffset }, onProgress);
+    toast.success(`${result.files.length - 1} stems locked to ${plan.targetBpm} BPM in Remix Lab › Stems › ${result.dir.split('/').pop()}`);
+    return result;
+  }, [stems, stemTypes, stemMeta, separationMode, sections, gridOffset, toast]);
+
   const handleKeepStem = useCallback((stemType) => keepStem(stemType, stemMeta), [keepStem, stemMeta]);
   const handleKeepAll = useCallback(() => keepAllStems(stemMeta), [keepAllStems, stemMeta]);
   const handleDownloadStem = useCallback((stemType) => downloadStemFile(stemType, stemMeta), [downloadStemFile, stemMeta]);
@@ -672,6 +701,18 @@ export function Analyze({ theme, t }) {
                 onSaveToLive={helper.online ? handleSaveToLive : null}
                 onKeepStem={handleKeepStem}
                 onKeepAll={handleKeepAll}
+                tempoLock={separationStatus === 'ready' && helper.online ? (
+                  <TempoLock
+                    duration={audio.duration}
+                    detectedBpm={stemMeta.bpm}
+                    sourceKey={stemMeta.key}
+                    onAnalyse={handleAnalyseBeats}
+                    onLock={handleLockToLive}
+                    canLock={!!helper.health?.canLock}
+                    theme={theme}
+                    t={t}
+                  />
+                ) : null}
                 onReset={handleResetStems}
                 onCancel={cancelSeparation}
                 hasAudio={!!audioFileData}

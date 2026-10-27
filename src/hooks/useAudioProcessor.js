@@ -659,6 +659,7 @@ export function useAudioProcessor() {
     generateWaveformData: worker.generateWaveformData,
     generateWaveformColors: worker.generateWaveformColors,
     detectTempoAndKey: worker.detectTempoAndKey,
+    detectBeats: worker.detectBeats,
     detectSections: worker.detectSections,
   };
 }

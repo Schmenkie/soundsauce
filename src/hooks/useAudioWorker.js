@@ -131,6 +131,20 @@ export function useAudioWorker() {
   }, [postMessage]);
 
   /**
+   * Beat grid for "lock to tempo". Run it on the mix or the instrumental — a vocal has
+   * too few transients and tracks the wrong tempo entirely.
+   * @param {Float32Array} channelData mono samples
+   * @param {number} sampleRate
+   * @param {{ minBpm?: number, maxBpm?: number }} [options]
+   * @returns {Promise<{ beats: number[], bpm: number, tempoRange: {min:number,max:number},
+   *                     downbeatIndex: number, confidence: number, trackedBpm: number }>}
+   */
+  const detectBeats = useCallback((channelData, sampleRate, options) => {
+    const buffer = channelData.buffer.slice(channelData.byteOffset, channelData.byteOffset + channelData.byteLength);
+    return postMessage('DETECT_BEATS', { channelData: buffer, sampleRate, options }, [buffer]);
+  }, [postMessage]);
+
+  /**
    * Section labels (intro / breakdown / buildup / drop / outro) from per-bar energy.
    * @param {{ role: string, data: Float32Array }[]} layers  the full mix, or one entry per stem
    * @param {number} sampleRate
@@ -150,6 +164,7 @@ export function useAudioWorker() {
     isProcessing,
     progress,
     detectTempoAndKey,
+    detectBeats,
     detectSections,
     generateWaveformColors,
     generateWaveformData,

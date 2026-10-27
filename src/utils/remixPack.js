@@ -1,6 +1,7 @@
 import { zipSync, strToU8 } from 'fflate';
-import { buildStemFilename, buildPackFilename, buildPackNotes, buildPackFolderName } from './stemFiles';
-import { helperSaveStems } from '../lib/helper';
+import { buildStemFilename, buildPackFilename, buildPackNotes, buildPackFolderName, buildLockedFolderName } from './stemFiles';
+import { lockedSections } from './tempoLock';
+import { helperSaveStems, helperStartLock, helperLockJob } from '../lib/helper';
 import { upload } from '@vercel/blob/client';
 import { labAuthHeaders } from '../lib/labAuth';
 
@@ -88,6 +89,58 @@ export function saveStemsToLive(stemUrls, meta, mode, extras) {
     files: types.map(type => ({ name: buildStemFilename(meta, type, mode, extFromUrl(stemUrls[type])), url: stemUrls[type] })),
     notes: buildPackNotes(meta, types, mode, extras),
   });
+}
+
+/**
+ * Same as saveStemsToLive, but the helper renders each stem onto a fixed grid first:
+ * resample by whole semitones, then time-map the remainder plus the record's drift. The
+ * files land in Live's browser already on the grid, so they go in with Warp off.
+ *
+ * @param {Record<string, string>} stemUrls keyed by stem type
+ * @param {object} meta stamped-filename metadata (BPM/key should already be the locked ones)
+ * @param {string} mode separation mode id
+ * @param {object} plan a planTempoLock() result
+ * @param {{ sections?: object[], gridOffset?: number }} [extras] for notes.txt
+ * @param {(progress:number, phase:string) => void} [onProgress]
+ * @returns {Promise<{ dir: string, files: string[] }>}
+ */
+export async function lockStemsToLive(stemUrls, meta, mode, plan, extras = {}, onProgress) {
+  const types = Object.keys(stemUrls).filter(k => stemUrls[k]);
+  // The files that come out are at the target tempo and in the shifted key — stamp them
+  // that way, and move the section markers onto the new timeline (bar 1 is now 0:00).
+  // The detector's confidence and half/double readings belong to the original tempo —
+  // this one is exact, so drop them rather than repeat them against the new number.
+  const lockedMeta = {
+    ...meta,
+    bpm: plan.targetBpm,
+    key: plan.resultKey || meta.key,
+    bpmConfidence: null,
+    halfTempo: null,
+    doubleTempo: null,
+  };
+  const { id } = await helperStartLock({
+    folder: buildLockedFolderName(meta, plan.targetBpm),
+    files: types.map(type => ({ name: buildStemFilename(lockedMeta, type, mode, 'flac'), url: stemUrls[type] })),
+    lock: {
+      sampleRate: plan.sampleRate,
+      resampleRate: plan.resampleRate,
+      padFrames: plan.padFrames,
+      timeMap: plan.timeMap,
+    },
+    notes: buildPackNotes(lockedMeta, types, mode, {
+      sections: lockedSections(plan, extras.sections),
+      gridOffset: 0,
+      lock: plan,
+    }),
+  });
+
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000));
+    const state = await helperLockJob(id);
+    onProgress?.(state.progress || 0, state.phase || '');
+    if (state.status === 'error') throw new Error(state.error || 'Tempo lock failed');
+    if (state.status === 'done') return state.result;
+  }
 }
 
 /**
