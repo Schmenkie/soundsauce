@@ -24,6 +24,14 @@ test.describe('Remix Lab smoke tests', () => {
     await expect(page).toHaveTitle(/Calculator/);
   });
 
+  test('sample finder loads with its target controls', async ({ page }) => {
+    await page.goto('/sample');
+    await expect(page).toHaveTitle(/Find a sample/);
+    // The page works without the helper; the target inputs are always there.
+    await expect(page.getByLabel('Project tempo')).toBeVisible();
+    await expect(page.getByLabel('Project key')).toBeVisible();
+  });
+
   test('helper guide opens from the floating icon', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Show tips' }).click({ force: true }); // the icon idles on an infinite animation

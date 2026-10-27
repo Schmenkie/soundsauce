@@ -118,3 +118,45 @@ export function formatDuration(seconds) {
   const m = Math.floor(s / 60);
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
+
+// --- Apple Music library index ---------------------------------------------
+
+/** The local library index: playlists, analysed rows and the batch's running totals. */
+export function helperLibrary() {
+  return request('/library', {}, 30000);
+}
+
+/** Every user playlist, live from Music. Slow — it counts the tracks of each one. */
+export function helperPlaylists() {
+  return request('/library/playlists', {}, 180000);
+}
+
+/** Pull a playlist into the index. Returns a job id — poll with helperSyncJob(). */
+export function helperStartSync(persistentId) {
+  return request('/library/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ persistentId }),
+  });
+}
+
+export function helperSyncJob(id) {
+  return request(`/library/sync/${id}`);
+}
+
+export function helperAnalysis() {
+  return request('/library/analyse', {}, 20000);
+}
+
+/** @param {{ concurrency?: number, limit?: number, playlistId?: string, retryFailed?: boolean }} opts */
+export function helperStartAnalysis(opts = {}) {
+  return request('/library/analyse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  }, 30000);
+}
+
+export function helperStopAnalysis() {
+  return request('/library/analyse/stop', { method: 'POST' }, 20000);
+}

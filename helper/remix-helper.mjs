@@ -22,6 +22,15 @@
  *   POST /lock {folder, files:[{name,url}], lock, notes}
  *                           -> { id }             same, but resampled + time-mapped onto a fixed grid
  *   GET  /lock/:id          -> { status, phase, progress, result?, error? }
+ *   GET  /library           -> { playlists, tracks, stats }   the Apple Music index
+ *   GET  /library/playlists -> { playlists }                  live from Music, by persistent ID
+ *   POST /library/sync {persistentId}
+ *                           -> { id }             pull a playlist into the index
+ *   GET  /library/sync/:id  -> { status, phase, progress, result?, error? }
+ *   GET  /library/analyse   -> batch state (progress, throughput, ETA, recent outcomes)
+ *   POST /library/analyse {concurrency, limit, playlistId, retryFailed}
+ *                           -> batch state        resumable BPM + key batch
+ *   POST /library/analyse/stop -> { running, stopRequested }
  *
  * Finished files are also copied to ~/Music/Remix Lab/Sources/ (and stems land in
  * ~/Music/Remix Lab/Stems/) so they show up in Live's browser once ~/Music/Remix Lab
@@ -34,6 +43,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import {
+  listPlaylists, syncPlaylist, readIndex, matchRows, indexStats,
+  startAnalysis, stopAnalysis, analysisState, libraryFile,
+} from './library.mjs';
 
 const VERSION = '0.1.0';
 const PORT = Number(process.env.REMIX_HELPER_PORT) || 7331;
@@ -701,6 +714,45 @@ function startLockJob({ folder, files, lock, notes }) {
   return job;
 }
 
+// ---------------------------------------------------------------------------
+// library: Apple Music ingest
+// ---------------------------------------------------------------------------
+
+/** AppleScript takes ~25s for 2300 tracks, so the sync runs as a job like the others. */
+function startSyncJob(persistentId) {
+  const id = randomUUID();
+  const dir = path.join(WORK_DIR, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const job = {
+    id,
+    status: 'running',
+    phase: 'starting',
+    progress: 0,
+    createdAt: Date.now(),
+    dir,
+    result: null,
+    error: null,
+    log: [],
+  };
+  jobs.set(id, job);
+
+  syncPlaylist(persistentId, (phase, progress) => {
+    job.phase = phase;
+    job.progress = progress;
+  }).then((result) => {
+    job.result = result;
+    job.status = 'done';
+    job.phase = 'done';
+    job.progress = 100;
+  }).catch((err) => {
+    job.status = 'error';
+    job.error = err.message;
+    log(`library sync failed: ${err.message}`);
+  });
+
+  return job;
+}
+
 const server = http.createServer(async (req, res) => {
   cors(req, res);
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
@@ -753,7 +805,49 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await saveStems(body));
     }
 
-    let m = p.match(/^\/lock\/([0-9a-f-]{36})$/);
+    if (req.method === 'GET' && p === '/library') {
+      const index = readIndex();
+      return json(res, 200, {
+        playlists: index.playlists,
+        updatedAt: index.updatedAt,
+        tracks: matchRows(index),
+        stats: indexStats(index),
+        file: libraryFile(),
+      });
+    }
+
+    if (req.method === 'GET' && p === '/library/playlists') {
+      return json(res, 200, { playlists: await listPlaylists() });
+    }
+
+    if (req.method === 'POST' && p === '/library/sync') {
+      const { persistentId } = await readBody(req);
+      if (!persistentId) return json(res, 400, { error: 'persistentId required' });
+      const job = startSyncJob(persistentId);
+      return json(res, 202, { id: job.id });
+    }
+
+    if (req.method === 'GET' && p === '/library/analyse') {
+      return json(res, 200, analysisState());
+    }
+
+    if (req.method === 'POST' && p === '/library/analyse') {
+      const body = await readBody(req);
+      return json(res, 202, startAnalysis(body));
+    }
+
+    if (req.method === 'POST' && p === '/library/analyse/stop') {
+      return json(res, 200, stopAnalysis());
+    }
+
+    let m = p.match(/^\/library\/sync\/([0-9a-f-]{36})$/);
+    if (req.method === 'GET' && m) {
+      const job = jobs.get(m[1]);
+      if (!job) return json(res, 404, { error: 'Job not found' });
+      return json(res, 200, { status: job.status, phase: job.phase, progress: job.progress, result: job.result, error: job.error });
+    }
+
+    m = p.match(/^\/lock\/([0-9a-f-]{36})$/);
     if (req.method === 'GET' && m) {
       const job = jobs.get(m[1]);
       if (!job) return json(res, 404, { error: 'Job not found' });

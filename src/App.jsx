@@ -9,6 +9,7 @@ import { ToastProvider } from './components/ui/Toast';
 const Analyze = lazy(() => import('./pages/Analyze').then(m => ({ default: m.Analyze })));
 const Vault = lazy(() => import('./pages/Vault').then(m => ({ default: m.Vault })));
 const Calc = lazy(() => import('./pages/Calc').then(m => ({ default: m.Calc })));
+const Sample = lazy(() => import('./pages/Sample').then(m => ({ default: m.Sample })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })));
 
@@ -25,6 +26,7 @@ function PageFallback() {
  *   /          Lab — drop a track, grab vocals / stems, analyze (/?track=<id> restores from the vault)
  *   /vault     Vault — every separated track: search, key/tempo filters, re-download, restore, delete
  *   /calc      Remix Calculator — transpose / tempo / warp advice (/calc?track=<id> prefills the source)
+ *   /sample    Find a sample — a BPM + key against the Apple Music index; results open the Lab at /?find=<text>
  *   /settings  theme, DAW, lab lock
  *   /analyze   legacy URL → /
  */
@@ -49,6 +51,7 @@ export default function App() {
             <Route path="/analyze" element={<Navigate to="/" replace />} />
             <Route path="/vault" element={<Vault theme={theme} t={t} />} />
             <Route path="/calc" element={<Calc theme={theme} t={t} />} />
+            <Route path="/sample" element={<Sample theme={theme} t={t} />} />
             <Route path="/settings" element={<Settings theme={theme} t={t} onThemeToggle={handleThemeToggle} />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -31,8 +31,13 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 1. **Section detector tuning** — it's an energy heuristic (see below). Judge it on real tracks over a week; the knobs are the band weights, the 0.2 novelty step, the p80 − 0.25 drop cut and the buildup rise threshold in `detectSections()`. Keep a few hand-labelled tracks as a fixture before tuning (the vault's `sections` with `sectionsSource: 'manual'` are exactly that).
 2. **Blob budget reality** — long tracks cost ~120–215 MB, not 55; consider not keeping the source upload.
 3. **Helper title cleanup** — YouTube titles like "Lauren (Official Visualiser) | Ministry of Sound" get through `splitArtistTitle()`; strip `| Label` suffixes and "(Official Visualiser)".
-4. **Lock to tempo from the Vault** — the button only exists in the Lab today; the Vault would have to fetch and decode a stem to beat-track it.
-5. Parked: mashup preview (Stem Player engine + playbackRate), Vault as a Camelot wheel, `.als` generation with locators from the sections.
+4. **Sample finder accuracy** — key is the weak link (one in eight wrong); the octave-folded
+   BPM was right on all 7 confidently-paired rows. Worth re-measuring with
+   `scripts/library-check.mjs` once the whole playlist is analysed and the overlap is bigger.
+   `DETECT_BEATS` (the tempo-lock beat tracker) is more accurate than `detectBPM` if tempo ever
+   does prove to be the problem.
+5. **Lock to tempo from the Vault** — the button only exists in the Lab today; the Vault would have to fetch and decode a stem to beat-track it.
+6. Parked: mashup preview (Stem Player engine + playbackRate), Vault as a Camelot wheel, `.als` generation with locators from the sections.
 
 **Gotchas for whoever picks this up**
 - The Browser pane in Claude Code is a fresh profile: unlock with the `LAB_PASSWORD` from `.env.local` (POST `/api/auth`, store `{token, expiresAt}` in `localStorage.soundsauce_lab_session`). In that pane **Enter doesn't submit forms and `form_input` doesn't fire React onChange** — set the value with the native setter + an `input` event, then click buttons. Its screenshots render at quarter size; use `read_page` / `get_page_text` / `javascript_tool` for facts. Synthetic `PointerEvent`s do drive the section strip (there's a try/catch around `setPointerCapture`).
@@ -42,6 +47,14 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 - `npm run dev:full` starts a second helper that loses the fight for :7331 to the menubar one — harmless, the first one answers. An orphan can be cleared with `pkill -f remix-helper.mjs`.
 - Key detection ground truth: `scripts/key-truth.json` (117 tracks, Camelot codes from Rekordbox). Re-run `node scripts/key-bench.mjs` after touching `detectKey`; the numbers to beat are in the comment above `KEY_DETECT_DEFAULTS`. Both scripts eval the worker source directly, so the worker must stay free of `import`s.
 - `useToast()` returns `{ toast }` — destructure it.
+- **AppleScript into Music**: match playlists by `persistent ID`, never by name, and read
+  properties per track inside a `repeat` — bulk access (`artist of every track of p`) throws on
+  Apple Music cloud items. If the helper is started as a LaunchAgent and `osascript` returns
+  -1743, allow it under System Settings → Privacy & Security → Automation.
+- **Never run worker DSP inline in the helper.** `detectBPM`/`detectKey` block the event loop
+  for seconds; during the first library batch that made `/health` time out and the Lab showed
+  "paste-a-link is off" while the helper was perfectly alive. They live in
+  `helper/detect-worker.mjs` now.
 - **rubberband time maps fail silently.** A `-M` map needs an overall `-D` matching the map's last target frame, or it emits NaN and passes the audio through unstretched (exit 0). Never write a `0 0` anchor either — it's a 0/0 segment with the same warning. Also: this Mac's ffmpeg has no soxr, so `aresample=…:resampler=soxr` errors out; use `filter_size=`.
 - Beat tracking (`DETECT_BEATS`) must never be run on a vocal stem — it tracks half-tempo and is wrong. Confidence under 40 means "we were handed the wrong stem".
 - `src/data/helperGuide.js` is the in-app manual — **update it whenever a button is added, renamed or moved.**
@@ -63,7 +76,8 @@ That's the whole product as of 2026-09-15. Everything else that used to be here 
 | Animation | `motion/react` (Dock, modals) |
 | Icons | `lucide-react` (must stay in `package.json` deps — a missing entry broke Vercel builds in May 2026) |
 | Tempo lock | `rubberband` 4 + ffmpeg on the Mac, driven by the helper (`brew install rubberband`) |
-| Testing | Vitest (51 tests: DSP helpers, remix math, tempo lock, a11y) + Playwright smoke tests (`e2e/smoke.spec.js`: routes, helper guide, sign-in dialog) |
+| Sample finder | Apple Music playlists via `osascript` → `~/Music/Remix Lab/library.json`; BPM + key computed by a resumable helper batch (yt-dlp → ffmpeg → `detect-worker.mjs`) |
+| Testing | Vitest (84 tests: DSP helpers, remix math, tempo lock, sample matching, a11y) + Playwright smoke tests (`e2e/smoke.spec.js`: routes, helper guide, sign-in dialog) |
 | Deploy | Vercel (`vercel build --prod && vercel deploy --prebuilt --prod`) |
 
 ## Project Structure
@@ -80,20 +94,24 @@ audio-analyzer-pro/
 │   ├── separate-stems.js        # Start Demucs prediction: mode vocals|stems4|stems6, quality best|fast, FLAC
 │   └── check-stems.js           # Poll prediction; returns whatever stem keys the mode produced
 ├── helper/
-│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files, POST /stems, POST /lock
+│   ├── remix-helper.mjs         # Local yt-dlp companion (localhost:7331): /health, /resolve, /jobs, /files, POST /stems, POST /lock, /library*
+│   ├── library.mjs              # Apple Music index: osascript ingest + the resumable BPM/key batch (~/Music/Remix Lab/library.json)
+│   ├── detect-worker.mjs        # detectBPM + detectKey on a worker thread, so the batch can't stall the HTTP server
 │   ├── install-launchagent.sh   # Installs the helper alone as a LaunchAgent (npm run helper:install)
 │   └── menubar/                 # rumps menubar app (status dot, supervises the helper) + install.sh (npm run menubar:install)
 ├── scripts/
 │   ├── dev-api.mjs              # Local runner for api/*.js on :3001 (Vite proxies /api there)
 │   ├── key-check.mjs            # Run detectKey/detectBPM on one file
 │   ├── key-bench.mjs            # Score detectKey against key-truth.json (exact / relative / neighbour / wrong)
+│   ├── library-check.mjs        # Score the sample finder's library.json against key-truth.json (whole pipeline, strict pairing)
 │   └── key-truth.json           # 117 tracks from ~/Desktop/Mixing Mersic with Rekordbox Camelot keys
-├── e2e/smoke.spec.js            # Playwright smoke tests (lab loads, /analyze redirect, settings, vault, calc, guide, sign-in dialog)
+├── e2e/smoke.spec.js            # Playwright smoke tests (lab loads, /analyze redirect, settings, vault, calc, sample, guide, sign-in dialog)
 ├── src/
 │   ├── lib/
 │   │   ├── helper.js            # Client for the local helper (health, resolve, jobs, file URLs, saveStems, clipboard URL sniffing)
 │   │   ├── vault.js             # Vault client: fetch/save/deleteBlobs, vaultIdFor(), Camelot + tempo compatibility, storage helpers
 │   │   └── labAuth.js           # getLabToken, labAuthHeaders, labSignIn, labVerify, labSignOut (localStorage)
+│   │                            # (helper.js also carries the /library client: playlists, sync, analyse, stop)
 │   ├── contexts/AuthContext.jsx # AuthProvider/useAuth: { isSignedIn, loading, signIn, signOut }
 │   ├── components/
 │   │   ├── auth/LabSignIn.jsx   # Password modal (focus trap, dock auto-hide)
@@ -110,18 +128,21 @@ audio-analyzer-pro/
 │   │   ├── useStemSeparation.js # Separation workflow, keep-to-Blob, stamped downloads, Remix Pack zip
 │   │   ├── useStemPlayer.js     # Synced multi-stem playback (own AudioContext, per-stem gains, loop), lane waveforms, getBuffer()
 │   │   ├── useVault.js          # Vault state: cached load, serialised whole-index saves, upsertTrack/removeTrack
+│   │   ├── useLibrary.js        # Apple Music index from the helper: cached rows, sync, batch state polling
 │   │   ├── useHelper.js         # Helper availability (15s poll + focus), resolve(query), grab(url) with job progress
 │   │   ├── useTheme.js, usePageTitle.js, useFocusTrap.js
 │   ├── pages/
 │   │   ├── Analyze.jsx          # The Lab (route "/") — import, header, sections + waveform → stems → Stem Player
 │   │   ├── Vault.jsx            # /vault — track grid, search, Camelot chips, "mixes with", inline edit, keep / keep all, pack / to live, delete
 │   │   ├── Calc.jsx             # /calc — Remix Calculator: transpose / tempo / warp advice, vault pickers, 0-shift targets
+│   │   ├── Sample.jsx           # /sample — Find a sample: BPM + key → ranked library tracks, playlist sync, the analysis batch
 │   │   ├── Settings.jsx         # Theme, lab lock, Blob storage readout
 │   │   └── NotFound.jsx
 │   ├── utils/
 │   │   ├── sections.js          # SECTION_LABELS, SECTION_COLORS, barAtTime()
 │   │   ├── tempoLock.js         # Pure lock math: planTempoLock(), buildTimeMap(), mapTimeThroughLock(), bestResampleSemitones()
 │   │   ├── remixMath.js         # Pure calculator math: camelotOf, relativeKey, transposeSemitones, tempoChange, warpAdvice, compatibleTargets
+│   │   ├── sampleMatch.js       # Pure match math: canonicalBpm (octave fold), tempoDelta, keyRelation, rankSamples
 │   │   ├── remixPack.js         # buildRemixPackBlob / downloadRemixPackFromUrls / downloadStemFromUrl / saveStemsToLive / keepStemUrl
 │   │   ├── spectrum.js          # Signal Deck colour system
 │   │   ├── stemFiles.js         # SEPARATION_MODES, getStemLabel, buildStemFilename, buildPackFilename, buildPackNotes (with sections)
@@ -181,6 +202,78 @@ One JSON document, `vault/index.json` on Vercel Blob, read/written only through 
 - **Warp advice**: ≤5% clean Complex Pro, ≤10% fine, ≤18% audible, beyond that Re-Pitch (with the pitch it introduces — `repitchSemitones(ratio)` — subtracted from the transpose figure).
 - **Compatible targets**: same / relative / ±1 on the Camelot wheel, each with its semitone cost; zero-shift options first. Clicking one sets the target.
 - Vault cards link to `/calc?track=<id>`.
+
+### Find a sample (`/sample`)
+
+Rekordbox's related-tracks, against Spencer's own listening. Type the project's BPM and key;
+get the tracks from an Apple Music playlist that are harmonically and rhythmically close, each
+one a click away from the normal grab-and-separate flow (`/?find=<artist title>` hands the
+Lab's import box a search and runs it).
+
+**Apple Music gives us nothing but names.** There is no key field, no BPM on the vast majority
+of tracks (0 of 25 sampled), and no local `.musiclibrary` on this Mac — the playlists are
+cloud-only. So BPM and key are computed here, track by track.
+
+- **Ingest** (`helper/library.mjs`, `POST /library/sync`): `osascript` into Music. Two traps,
+  both found the hard way — select a playlist by **persistent ID**, never by name (emoji-named
+  playlists mis-resolve and you silently get someone else's 85 tracks), and access properties
+  **per track inside a `repeat`**: `artist of every track of p` fails on Apple Music cloud items
+  with "Can't get artist of {shared track id …}". Per-track is also fast: 2307 rows in ~25 s.
+  `GET /library/playlists` lists every playlist with its count (slow — it counts them all).
+- **The index** is `~/Music/Remix Lab/library.json`, written atomically. **Never Blob storage**:
+  it is 2,300 rows of listening history and costs nothing to rebuild. Re-syncing a playlist is
+  one click — new rows arrive un-analysed, analysed rows keep their numbers, rows that left the
+  playlist lose their membership but stay in the index.
+- **The batch** (`POST /library/analyse`, `GET /library/analyse`, `POST /library/analyse/stop`):
+  per row — `yt-dlp ytsearch1:` search + download, ffmpeg decode to mono 44.1k, `detectBPM` +
+  `detectKey`, write the numbers back, **delete the audio**. Nothing accumulates on disk.
+  Resumable by construction: there is no queue to lose, it re-reads the index, skips anything
+  that already has numbers, and saves after every row — stopping, or killing the helper outright,
+  loses at most the track in flight. A row that fails three times is left alone until
+  "retry the N that failed". Concurrency is a knob, default 2; measured **~3.3 s per track**
+  wall-clock at that setting, so the whole 2,289-row playlist is about two hours.
+- **The detectors run on a worker thread** (`helper/detect-worker.mjs`). They are synchronous
+  and take seconds; called inline they stall the HTTP server long enough that the Lab's 3 s
+  `/health` check times out and paste-a-link goes dark mid-batch. With the thread, `/health`
+  stays under 1 s throughout.
+- **BPM is folded into one octave on the way in** (`canonicalBpm`, FOLD_MIN 90, mirrored in
+  `src/utils/sampleMatch.js`). `detectBPM` reads house and hip-hop at half time most of the
+  time — 128→63, 130→65, 148→73 — and an index full of 63s cannot be matched against a 132
+  project at all.
+- **The ranking is pure and tested** (`src/utils/sampleMatch.js`, 33 vitest). `rankSamples()`
+  reuses `compatibleCamelot()` / `tempoCompatible()` from `lib/vault.js` and
+  `transposeSemitones()` / `tempoChange()` from `remixMath.js` rather than restating the rules.
+  Two buckets: **drop-in** (tempo fits and the key already mixes, sorted same → ±1 → relative,
+  then by tempo distance) and **shift** (tempo fits, key doesn't, but moving *your project* by
+  N semitones fixes it — Spencer moves the project key regularly). Tolerance and "I'll shift my
+  track up to" are controls on the page.
+
+**What the numbers are actually worth** (measured 2026-10-27 over 541 analysed rows, don't
+re-derive):
+
+- Key, on the 117-track Rekordbox ground truth via `scripts/key-bench.mjs`: **65.0% exact,
+  87.2% usable**, 12.8% wrong — unchanged from the published bench, so the batch degrades
+  nothing. This is the reliable figure; it measures `detectKey` on clean local files.
+- The whole pipeline (search → rip → decode → detect) via `scripts/library-check.mjs`, on the
+  rows that can be **confidently** paired with `key-truth.json`: 3 of 7 exact, **6 of 7 usable**,
+  and **7 of 7 BPM within 2 BPM** after folding. n=7 is small, but it is consistent with the
+  bench and it is the only honest measure of the pipeline end to end.
+- **Pair strictly or the numbers lie.** A loose token match over the same data reported 42% of
+  keys wrong and only half the tempos right. Almost all of that was mis-pairing — it had matched
+  `be-free.mp3` to "…The Free Nationals…" on one shared token. `library-check.mjs` requires a
+  shared title token, a shared artist token and symmetric Jaccard ≥ 0.5; it throws away correct
+  pairs whose truth filename is a bare title, which is the right trade.
+- **Confidence is a hint, not a gate.** Across 117 tracks it separates on average (mean 81 for
+  exact, 67 for wrong) and by band — under 60 is 62% usable, 80+ is 96% — but **3 of the 15
+  wrong answers scored 80 or more, one of them 100**. So the page marks a sub-60 key with a `~`
+  and sorts and filters on nothing. `bpmConfidence` is worse still: it does **not** separate
+  right from wrong (mean 26 vs 25) and every single row scores under 40, so it is stored for
+  debugging and never shown. The earlier note that confidence was *anti*-correlated came from an
+  11-track sample and doesn't hold at 117.
+- A **red triangle** on a row means the track we found was a very different length from the one
+  in the library — 49 of 541 rows, 9%. Probably an extended mix or the wrong upload.
+- Failures: 17 of 558 attempted, **3%** — YouTube 403s (transient, retried) and age-gated videos
+  (`Sign in to confirm your age`), which will exhaust their three attempts and be left alone.
 
 ### Stem separation pipeline
 
@@ -358,9 +451,10 @@ npm run menubar         # Run the status-dot menubar app in the foreground (need
 npm run menubar:install # Install the menubar app (+ helper supervision) as a login item
 node scripts/key-check.mjs "<file>"      # Key + BPM for one file
 node scripts/key-bench.mjs [--verbose]   # Score detectKey against scripts/key-truth.json
+node scripts/library-check.mjs           # Score the sample finder's library index against the same truth
 npm run build        # Production build to /dist (frontend only)
 npm run lint         # ESLint
-npm run test:run     # Vitest once (39 tests: DSP helpers, remix math, a11y)
+npm run test:run     # Vitest once (84 tests: DSP helpers, remix math, tempo lock, sample matching, a11y)
 npm run test:e2e     # Playwright smoke tests (needs dev server)
 vercel build --prod && vercel deploy --prebuilt --prod   # Deploy (includes /api functions)
 ```
@@ -398,6 +492,7 @@ The product is: *paste a link → stems · key · BPM · section labels.*
 | 6 | **Stem Player** | ✅ | Synced mute/solo, lanes, bar grid, drag-to-loop |
 | 7 | **Sections** | ✅ | Auto-detected (mix → stems), editable, saved, in notes.txt |
 | 8 | **Lock to tempo** | ✅ | Beat-track → whole-semitone resample + time map → stems already on the grid, Warp off |
+| 9 | **Find a sample** (`/sample`) | ✅ | Apple Music playlist → BPM + key for every track → ranked against your project's tempo and key |
 | — | Removed 2026-09-15 | git | Analyzer / presets / Vital, Anatomy, Vocal Chop Kit, Notes, tags, batch grab, Gemini — `checkpoint-before-simplify` |
 | — | Later | Ideas | Section detector tuning against hand-labelled tracks, mashup preview, `.als` with locators from sections, Vault as a Camelot wheel |
 
@@ -407,9 +502,36 @@ The product is: *paste a link → stems · key · BPM · section labels.*
 - `Settings.jsx` and `SaucyHelper` still use the re-pointed `zinc/stone/amber` tokens. Cosmetic.
 - `e2e/smoke.spec.js` doesn't exercise the Stem Player or sections (needs a vault track + token).
 - Section detection is a heuristic tuned on five house / hip-hop / R&B tracks. Expect to drag a boundary or two on anything unusual.
+- The sample finder's key is a heuristic: 65% exact, 87% usable. Expect a wrong suggestion in
+  roughly one of eight rows, and don't trust `bpmConfidence` — it's under 40 for every row and
+  doesn't separate right from wrong.
+- Only 7 library rows can be confidently paired with `key-truth.json`, so the end-to-end
+  accuracy figure rests on a small sample. It will firm up as more of the playlist is analysed.
+- `yt-dlp ytsearch1:` picks whatever YouTube ranks first. 8% of rows come back a very different
+  length from the library track (flagged with a triangle); some of the rest are the right track
+  with a wrong tempo read.
+- `/sample` has no component test — only `sampleMatch.js` (33 vitest) and a route-level
+  Playwright smoke check are covered. The ingest and the batch have no automated test at all;
+  both need Music and the network.
+- Re-syncing a playlist never removes a row from the index, only its membership. Nothing prunes
+  orphans yet.
 - Lock to tempo is Lab-only: the Vault's "to live" has no lock option, because beat tracking needs the audio decoded. Also no "keep the pitch" toggle in the UI, though `planTempoLock({ semitones: 0 })` supports it.
 
 ## Completed
+
+- [x] **Find a sample** (Oct 27 2026) — "type a BPM and a key, get songs from my own library
+  that are close in both, so I can sample their vocals": Rekordbox's related-tracks against
+  Apple Music. New `helper/library.mjs` (osascript playlist ingest by persistent ID, per-track
+  property access, atomic `~/Music/Remix Lab/library.json`, resumable analysis batch that
+  deletes every download), `helper/detect-worker.mjs` (BPM/key on a worker thread so the batch
+  can't stall `/health`), seven `/library*` endpoints, `src/utils/sampleMatch.js` (octave-folded
+  tempo + the two ranking buckets, 33 vitest), `useLibrary`, `pages/Sample.jsx`, a Dock entry,
+  `/?find=<text>` into the Lab's import box, and a `/sample` chapter in `helperGuide.js`.
+  Verified end to end: synced "Comp" (2307 entries → 2289 unique rows in ~25 s of AppleScript),
+  ran the batch at the default concurrency 2 over **541 tracks** (3.2–3.3 s each, 3% failures),
+  stopped and restarted it — including killing the helper outright mid-run — with no loss, then
+  queried 132 BPM in C# minor and got a sensible ranked list. The numbers, and why confidence is marked but never sorted on,
+  are under "Find a sample" above. 84 vitest, 7 Playwright, lint clean of new errors, build green.
 
 - [x] **Lock to tempo** (Oct 26 2026) — stems can be exported already fixed to a target BPM, so they go into Live with Warp off. Built after a 1979 acapella at ~150 BPM (drifting 148.9–153.2) couldn't be fitted to a 132 project by hand: too few transients for Auto-Warp or our own `detectBPM` (confidence 18, answer 158). New `utils/tempoLock.js` (pure, 12 vitest), worker `DETECT_BEATS`, helper `POST /lock` + `GET /lock/:id` (+ `rubberband` / `canLock` in `/health`), `components/audio/TempoLock.jsx` in the stems-ready panel, `buildLockedFolderName()` and the lock block in `buildPackNotes()`, `helperGuide.js` entry. Verified end to end in the browser on the vault's "Just Dance": 119 → 128 BPM, +1 st → F major, output measured 128.011 BPM at 1.2 ms mean / 18.3 ms max from an exact grid. The drifting record through the same render: 132.003 BPM, 6.5 ms / 84.1 ms, against 70.2 ms / 197.7 ms for a single rigid warp marker. 51 vitest, lint clean of new errors.
 

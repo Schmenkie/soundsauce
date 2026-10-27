@@ -10,7 +10,7 @@ import { extractMediaUrl, formatDuration } from '../../lib/helper';
  * onImported({ arrayBuffer, meta }) hands the file to the Lab. A playlist / set URL
  * resolves to its entries — pick one.
  */
-export function LinkImport({ helper, onImported, hero = false, theme, t }) {
+export function LinkImport({ helper, onImported, hero = false, initialQuery = null, onInitialQueryUsed, theme, t }) {
   const { online, health, checking, resolving, resolve, job, grab } = helper;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -58,6 +58,17 @@ export function LinkImport({ helper, onImported, hero = false, theme, t }) {
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
   }, [online]);
+
+  // Handed a search from somewhere else (/?find=… from the sample finder): run it once
+  // the helper is up, exactly as if it had been typed in.
+  const initialDoneRef = useRef(null);
+  useEffect(() => {
+    if (!initialQuery || !online || initialDoneRef.current === initialQuery) return;
+    initialDoneRef.current = initialQuery;
+    setQuery(initialQuery);
+    handleResolveRef.current?.(initialQuery);
+    onInitialQueryUsed?.();
+  }, [initialQuery, online, onInitialQueryUsed]);
 
   const handleResolve = async (q = query) => {
     const trimmed = q.trim();

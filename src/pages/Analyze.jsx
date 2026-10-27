@@ -84,6 +84,15 @@ export function Analyze({ theme, t }) {
   const helper = useHelper();
   const vault = useVault();
   const [searchParams, setSearchParams] = useSearchParams();
+  // /?find=<artist title> — the sample finder hands the import box a search
+  const findQuery = searchParams.get('find');
+  const clearFindQuery = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('find');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [restoringTrack, setRestoringTrack] = useState(null);
 
   // Track state
@@ -524,7 +533,15 @@ export function Analyze({ theme, t }) {
         )}
 
         {/* Paste a link / search — via the local helper */}
-        <LinkImport helper={helper} onImported={handleImported} hero={!audioFileData} theme={theme} t={t} />
+        <LinkImport
+          helper={helper}
+          onImported={handleImported}
+          hero={!audioFileData}
+          initialQuery={findQuery}
+          onInitialQueryUsed={clearFindQuery}
+          theme={theme}
+          t={t}
+        />
 
         {/* Drop zone (a panel when nothing is loaded, one line afterwards) */}
         <AudioUploadSection

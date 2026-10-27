@@ -125,6 +125,38 @@ export const GUIDE = {
       },
     ],
   },
+  '/sample': {
+    tips: [
+      { title: 'Your own library', tip: 'Type your project tempo and key; the list is tracks from your Apple Music playlist that already mix with it. Click one and the Lab starts grabbing it.' },
+      { title: 'Why it has to analyse', tip: 'Apple Music stores no key and no BPM, so every track is searched, downloaded, measured and deleted. Nothing is kept — not on this Mac, not in Blob storage.' },
+      { title: 'Shift my track', tip: 'The second list is tracks that fit the tempo but not the key, with how far to transpose your own project to meet them. Set it to "not at all" to hide it.' },
+      { title: 'Leave it running', tip: 'The batch takes a couple of hours for a few thousand tracks. Stop it whenever — it picks up where it left off, and never re-does a track it already has.' },
+    ],
+    sections: [
+      {
+        title: 'Finding something',
+        items: [
+          { name: 'bpm / key / mode', cost: 'free', what: 'Your project. Remembered between visits. The Camelot code underneath is what the matching actually uses.' },
+          { name: 'tempo tolerance', cost: 'free', what: 'How far off the tempo may be. ±8% is about the limit for a clean Complex Pro warp; half- and double-time readings always count as a match.' },
+          { name: "i'll shift my track up to", cost: 'free', what: 'How far you are willing to transpose your own project, which opens up keys that are not Camelot-compatible as they stand.' },
+          { name: 'A result row', cost: 'free', what: 'Click it to open the Lab with that artist and title already searched — then Get file, then Grab Vocals as usual.' },
+          { name: 'A "~" before the key', cost: 'free', what: 'The key detector was not confident. Nothing is sorted or hidden on confidence; it is right about two thirds of the time and in the right neighbourhood about 87%.' },
+          { name: 'A red warning triangle', cost: 'free', what: 'What we found on YouTube was a very different length from the track in your library — probably an extended mix or the wrong upload, so treat its numbers with suspicion.' },
+        ],
+      },
+      {
+        title: 'Your library',
+        items: [
+          { name: 'pick a playlist', cost: 'free', what: 'Asks Music for every playlist with its track count. Slow — it counts them all.' },
+          { name: 'A playlist button (re-sync)', cost: 'disk', what: 'Pulls that playlist again into ~/Music/Remix Lab/library.json. New tracks arrive un-analysed; anything already measured keeps its numbers.' },
+          { name: 'analyse all', cost: 'free', what: 'Works through every un-analysed row: YouTube search, download, BPM + key, then the audio is deleted. Two at a time, about 3 seconds each.' },
+          { name: 'just 100', cost: 'free', what: 'The same batch, capped — a quick top-up without committing to hours.' },
+          { name: 'retry the N that failed', cost: 'free', what: 'A row is left alone after three failures (nothing findable, a dead search). This clears the count and tries them again.' },
+          { name: 'stop', cost: 'free', what: 'Stops after the tracks in flight finish. Nothing is lost — the index is written after every single row.' },
+        ],
+      },
+    ],
+  },
   '/calc': {
     tips: [
       { title: 'Zero is best', tip: 'A green 0 st means the vocal already fits — the relative major/minor shares the same notes.' },
